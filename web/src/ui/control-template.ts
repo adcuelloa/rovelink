@@ -34,7 +34,7 @@ export const CONTROL_TEMPLATE = `
     <p class="status-light" id="chip-robot" data-on="false" role="status">Offline</p>
     <p class="status-light" id="chip-armed" data-on="false" role="status">Safe</p>
     <p class="label flex items-center gap-2">
-      Transport: <b id="transport-name">WebSocket</b>
+      Transport: <b>WebSocket</b>
     </p>
   </header>
 
@@ -93,7 +93,6 @@ export const CONTROL_TEMPLATE = `
   <aside class="module" aria-labelledby="bus-title">
     <div class="module__header">
       <h2 id="bus-title" class="label">Bus</h2>
-      <span class="label" id="transport-name">Mock</span>
     </div>
     <dl class="bus">
       ${DATA_POINT('tel-connection', 'Link', 'Disconnected')}

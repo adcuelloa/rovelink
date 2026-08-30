@@ -123,7 +123,9 @@ export function mountControl(app: HTMLElement): () => void {
   // --- configuration check --------------------------------------------------
   if (relay === undefined) {
     // No relay configured: show clear error state, do NOT fallback to mock.
-    instruments.update({ connection: 'disconnected', transport: 'WebSocket' });
+    instruments.update({
+      connection: 'disconnected',
+    });
     linkButton.disabled = true;
     linkButton.textContent = 'No relay configured';
     log('error', 'VITE_RELAY_URL is not set — cannot connect');
@@ -145,7 +147,6 @@ export function mountControl(app: HTMLElement): () => void {
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
 
-    instruments.update({ transport: transport.name });
     log('info', `transport: ${transport.name}`);
     sender.start(() => engine.state);
     void transport.connect();

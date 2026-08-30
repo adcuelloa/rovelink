@@ -25,7 +25,6 @@ export interface Readings {
   readonly sent: number;
   readonly received: number;
   readonly gamepad: string;
-  readonly transport: string;
   readonly telThrottle: number;
   readonly telSteering: number;
 }
@@ -43,7 +42,6 @@ export const INITIAL_READINGS: Readings = {
   sent: 0,
   received: 0,
   gamepad: 'not detected',
-  transport: 'WebSocket',
   telThrottle: 0,
   telSteering: 0,
 };
@@ -83,7 +81,6 @@ export class Instruments {
   readonly #gripperValue = $('#tel-gripper', HTMLElement);
   readonly #telThrottle = $('#tel-throttle', HTMLElement);
   readonly #telSteering = $('#tel-steering', HTMLElement);
-  readonly #transportValue = $('#transport-name', HTMLElement);
 
   #current: Readings = INITIAL_READINGS;
   #painted: Readings = INITIAL_READINGS;
@@ -148,7 +145,6 @@ export class Instruments {
     if (a.received !== p.received) this.#receivedValue.textContent = String(a.received);
     if (a.telThrottle !== p.telThrottle) this.#telThrottle.textContent = percent(a.telThrottle);
     if (a.telSteering !== p.telSteering) this.#telSteering.textContent = percent(a.telSteering);
-    if (a.transport !== p.transport) this.#transportValue.textContent = a.transport;
     if (a.gamepad !== p.gamepad) this.#gamepadStatus.textContent = `Controller: ${a.gamepad}`;
 
     this.#painted = a;
