@@ -8,6 +8,7 @@
     "typecheck": "oxlint --type-aware --type-check .",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "wrangler deploy",
     "test": "node --test src/control/*.test.ts src/transport/*.test.ts"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
     "tailwindcss": "4.3.3",
-    "vite": "8.2.0"
+    "vite": "8.2.0",
+    "wrangler": "4.127.1"
   }
 }
