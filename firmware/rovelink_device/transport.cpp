@@ -48,6 +48,8 @@ static bool registered = false;    // device.register already sent on this conne
 static bool hadPriorConnection = false;
 static unsigned long backoffMs = BACKOFF_MIN_MS;
 
+static void scheduleRetry();
+
 static char gripperFromText(const char *text)
 {
   if (text == nullptr)
@@ -169,6 +171,12 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
 
     connected = false;
     registered = false;
+    // The transition is detected here, not by polling isConnected() in
+    // transportLoop(): by the time that poll runs, this handler has already
+    // cleared `connected`, so a `connected && !connectedNow` check there
+    // never fires and backoff never escalates (confirmed: 240s of live
+    // capture at a flat ~2s retry cadence after an abrupt device reboot).
+    scheduleRetry();
     break;
 
   case WStype_ERROR:
@@ -257,15 +265,6 @@ void transportLoop()
   }
 
   wsClient.loop();
-
-  const bool connectedNow = wsClient.isConnected();
-  if (connected && !connectedNow)
-  {
-    Serial.println("[WSS] disconnected");
-    connected = false;
-    registered = false;
-    scheduleRetry();
-  }
 }
 
 bool transportConnected()
