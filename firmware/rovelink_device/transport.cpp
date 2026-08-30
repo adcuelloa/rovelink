@@ -41,6 +41,7 @@ static WebSocketsClient wsClient;
 
 static TransportControlCb cbControl = nullptr;
 static TransportEmergencyCb cbEmergencyStop = nullptr;
+static TransportSessionCb cbSessionChange = nullptr;
 
 static bool wsStarted = false;     // begin()/beginSslWithCA() already called this network session
 static bool connected = false;     // WStype_CONNECTED seen this session
@@ -122,6 +123,16 @@ static void handleText(uint8_t *payload, size_t length)
 
     ControlFrameIn frame;
     frame.seq = m["seq"].as<long>();
+    // Optional on the wire (see ControlFrame.controlSessionId in
+    // protocol.ts): a real relay always sets it, but a missing/malformed
+    // value must never be treated as "belongs to my current session" — see
+    // applyControlFrame() in the .ino, which compares this verbatim against
+    // activeSession and rejects on any mismatch, including empty.
+    if (m["controlSessionId"].is<const char *>())
+      strlcpy(frame.controlSessionId, m["controlSessionId"].as<const char *>(),
+              sizeof(frame.controlSessionId));
+    else
+      frame.controlSessionId[0] = '\0';
     frame.throttle = m["throttle"].as<float>();
     frame.steering = m["steering"].as<float>();
     frame.gripper = gripperFromText(m["gripper"].as<const char *>());
@@ -143,7 +154,16 @@ static void handleText(uint8_t *payload, size_t length)
     return;
   }
 
-  // "room", "pong", other registrations: not for this device, ignore.
+  if (strcmp(type, "controller.session") == 0)
+  {
+    if (!m["sessionId"].is<const char *>())
+      return;
+    if (cbSessionChange != nullptr)
+      cbSessionChange(m["sessionId"].as<const char *>());
+    return;
+  }
+
+  // "room", "pong": not for this device, ignore.
 }
 
 static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
@@ -236,6 +256,11 @@ void transportOnEmergencyStop(TransportEmergencyCb cb)
   cbEmergencyStop = cb;
 }
 
+void transportOnSessionChange(TransportSessionCb cb)
+{
+  cbSessionChange = cb;
+}
+
 void transportSetup()
 {
   wsClient.onEvent(onWsEvent);
@@ -281,7 +306,8 @@ const char *transportStatusText()
   return "down";
 }
 
-void transportSendTelemetry(int rssi, bool armed, float throttle, float steering, long ackSeq)
+void transportSendTelemetry(int rssi, bool armed, float throttle, float steering, long ackSeq,
+                            const char *ackSessionId)
 {
   if (!transportConnected())
     return;
@@ -291,6 +317,7 @@ void transportSendTelemetry(int rssi, bool armed, float throttle, float steering
   doc["type"] = "telemetry";
   doc["sentAt"] = millis();
   doc["ackSeq"] = ackSeq;
+  doc["ackSessionId"] = ackSessionId;
   doc["rssi"] = rssi;
   doc["throttle"] = throttle;
   doc["steering"] = steering;

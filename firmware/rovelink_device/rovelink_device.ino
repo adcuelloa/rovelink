@@ -40,6 +40,28 @@ unsigned long lastFrameMs = 0;
 long lastSeq = -1;
 bool linkAlive = false;
 
+// --- Control session (Problem 4) ---
+//
+// Which control session is currently authoritative, and whether it has
+// established its disarmed baseline yet. Both are changed ONLY by
+// onSessionChanged() (driven by the relay-authored `controller.session`
+// message) — never by a ControlFrame. A ControlFrame that doesn't match
+// activeSession is simply rejected; it can never adopt itself as the new
+// session, which is what stops a delayed frame from an old session rolling
+// activeSession backward after a newer one has already taken over.
+//
+// Starts empty: no real session id the relay mints is ever "", so the very
+// first ControlFrame this device receives after boot is guaranteed to
+// mismatch and be rejected until a real controller.session arrives — the
+// device cannot be driven merely by reconnecting.
+char activeSession[CONTROL_SESSION_ID_LEN] = "";
+// False until the first ControlFrame matching activeSession establishes the
+// disarmed baseline. While false, an armed=true frame is rejected outright
+// (see applyControlFrame) — a fresh session can only ever be armed by an
+// explicit, later Arm action, never by inheriting whatever the operator's
+// UI happened to say a moment before the session changed.
+bool sessionReady = false;
+
 float clampAxis(float v)
 {
   if (isnan(v))
@@ -69,13 +91,43 @@ void enterSafeState(const char *reason)
   hwLinkLed(false);
 }
 
-// Apply a decoded frame. `seq` filters retransmits and out-of-order arrivals:
-// only the newest frame is applied (latest state wins).
+// The ONLY function allowed to change activeSession — driven exclusively by
+// the relay-authored `controller.session` message (see transport.cpp), never
+// by a ControlFrame. Forces safe state before adopting the new session, and
+// resets both the seq baseline and the readiness gate: the new session must
+// re-establish its own disarmed baseline before anything can arm it (see
+// applyControlFrame).
+void onSessionChanged(const char *sessionId)
+{
+  Serial.print("[SESSION] active id=");
+  Serial.println(sessionId);
+
+  enterSafeState("session-change");
+  strlcpy(activeSession, sessionId, sizeof(activeSession));
+  lastSeq = -1;
+  sessionReady = false;
+}
+
+// Apply a decoded frame. A frame only ever does two things: (1) if it
+// matches the currently active session and hasn't been seen before, it may
+// establish that session's disarmed baseline or, once the baseline is
+// established, drive the vehicle; (2) otherwise it is rejected outright. It
+// can NEVER itself change activeSession — see onSessionChanged().
 void applyControlFrame(long seq, unsigned long sentAt, unsigned long ttlMs,
-                       float throttle, float steering, char gripper, bool armed)
+                       const char *sessionId, float throttle, float steering, char gripper,
+                       bool armed)
 {
   (void)sentAt;
   (void)ttlMs;
+
+  if (strcmp(sessionId, activeSession) != 0)
+  {
+    // Not the current session — e.g. a delayed frame from a controller that
+    // has since been replaced/reconnected. Silently dropped: this can never
+    // roll activeSession backward, and never happen frequently enough in
+    // normal operation to be worth logging every occurrence.
+    return;
+  }
 
   if (seq <= lastSeq)
     return;
@@ -90,6 +142,24 @@ void applyControlFrame(long seq, unsigned long sentAt, unsigned long ttlMs,
   Serial.print(clampAxis(steering), 2);
   Serial.print(" armed=");
   Serial.println(armed ? "true" : "false");
+
+  if (!sessionReady)
+  {
+    if (armed)
+    {
+      // A fresh session can never be armed by its first accepted frame,
+      // even though this frame legitimately belongs to it: the operator's
+      // browser may simply still have had armed=true from a moment ago.
+      // Remain SAFE_STATE and wait for an explicit armed=false frame to
+      // establish the baseline — only THEN can a later armed=true frame
+      // actually arm the vehicle.
+      Serial.println("[SESSION] armed=true rejected before disarmed baseline");
+      return;
+    }
+    sessionReady = true;
+    Serial.println("[SESSION] disarmed baseline established");
+    // Falls through: an armed=false frame is itself safely appliable below.
+  }
 
   if (!armed)
   {
@@ -157,10 +227,14 @@ void watchWssLink()
 void onControlReceived(const ControlFrameIn &frame)
 {
   linkAlive = true;
-  applyControlFrame(frame.seq, millis(), TTL_CONTROL_MS, frame.throttle, frame.steering,
-                    frame.gripper, frame.armed);
+  applyControlFrame(frame.seq, millis(), TTL_CONTROL_MS, frame.controlSessionId, frame.throttle,
+                    frame.steering, frame.gripper, frame.armed);
 }
 
+// Deliberately untouched by session/seq: emergency-stop must work regardless
+// of which session is active or in flight (see onSessionChanged /
+// applyControlFrame) — a safety action must never be filterable by ordering
+// logic that exists only to arbitrate normal driving frames.
 void onEmergencyStopReceived()
 {
   enterSafeState("emergency");
@@ -179,7 +253,7 @@ void sendTelemetry()
     return;
   lastTelemetryMs = millis();
   transportSendTelemetry(networkRssi(), currentState.armed, currentState.throttle,
-                         currentState.steering, lastSeq);
+                         currentState.steering, lastSeq, activeSession);
 }
 
 #if HARDWARE_SIMULATION
@@ -201,9 +275,19 @@ unsigned long lastHeartbeatMs = 0;
 char consoleLine[96];
 size_t consoleLineLength = 0;
 
+// The console has no relay to mint it a real session, so it plays the same
+// role locally: the first `c` after boot (or after a real controller.session
+// took over) establishes this fixed id as active, going through the exact
+// same onSessionChanged() + disarmed-baseline path a real session would. In
+// practice this means a `c ... 1` (armed) command right after boot or after
+// a network session took over needs a `c ... 0` first to establish the
+// baseline, same as a real fresh controller session would.
+static const char *CONSOLE_SESSION = "console";
+
 void printConsoleHelp()
 {
   Serial.println("[SIM] c <seq> <throttle> <steering> <armed 0|1> | s | go | gc | ?");
+  Serial.println("[SIM] after a session change, first `c` must be armed=0 to establish baseline");
 }
 
 void executeConsoleLine(char *line)
@@ -241,7 +325,9 @@ void executeConsoleLine(char *line)
     }
     // Console acts as link: once the first frame arrives, TTL takes over.
     linkAlive = true;
-    applyControlFrame(seq, millis(), TTL_CONTROL_MS, throttle, steering,
+    if (strcmp(activeSession, CONSOLE_SESSION) != 0)
+      onSessionChanged(CONSOLE_SESSION);
+    applyControlFrame(seq, millis(), TTL_CONTROL_MS, CONSOLE_SESSION, throttle, steering,
                       currentState.gripper, armed != 0);
     return;
   }
@@ -325,6 +411,7 @@ void setup()
   // decides alone); here we just register the callbacks.
   transportOnControl(onControlReceived);
   transportOnEmergencyStop(onEmergencyStopReceived);
+  transportOnSessionChange(onSessionChanged);
   transportSetup();
 }
 
