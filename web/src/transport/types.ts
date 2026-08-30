@@ -26,7 +26,19 @@ export type TransportEvent =
   | { readonly kind: 'telemetry'; readonly data: Telemetry }
   | { readonly kind: 'rtt'; readonly ms: number }
   | { readonly kind: 'counters'; readonly data: Counters }
-  | { readonly kind: 'alert'; readonly level: AlertLevel; readonly text: string };
+  | { readonly kind: 'alert'; readonly level: AlertLevel; readonly text: string }
+  /** The relay rejected the controller credential (WS close 4003
+   * `auth-failed`), or no credential was configured at all: the transport
+   * has already stopped retrying and discarded the bad key. The UI should
+   * return to the login prompt. */
+  | { readonly kind: 'auth-error'; readonly text: string }
+  /** The relay has confirmed this controller is now the authoritative
+   * session (`controller.session`, relay-authored only — see room.ts
+   * #handleControllerRegister). The UI must reset to SAFE_STATE and the
+   * sender must force-send the disarmed baseline in direct response — see
+   * ControlSender.establishSessionBaseline(). Never fires merely because
+   * the socket opened or a room broadcast arrived. */
+  | { readonly kind: 'session-established' };
 
 export type TransportListener = (event: TransportEvent) => void;
 

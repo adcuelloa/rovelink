@@ -36,6 +36,9 @@ export const CONTROL_TEMPLATE = `
     <p class="label flex items-center gap-2">
       Transport: <b>WebSocket</b>
     </p>
+    <button type="button" class="label hover:text-ice" id="btn-logout" title="Clear the stored controller key">
+      Log out
+    </button>
   </header>
 
   <section class="module" id="drive-panel" data-armed="false"

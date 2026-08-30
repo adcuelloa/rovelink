@@ -286,6 +286,13 @@ body {
     @apply border-sodium bg-sodium text-carbon;
   }
 
+  /* --- form fields (operator login) --- */
+
+  .field {
+    @apply border-groove text-ice min-h-11 w-full rounded border bg-white/5 px-3 text-sm;
+    @apply focus-visible:border-sodium;
+  }
+
   /* The only control we physically imitate: emergency stop button with stripes. */
   .e_stop {
     @apply text-ice relative min-h-11 w-full cursor-pointer rounded border-0 px-6 text-[0.72rem] uppercase;

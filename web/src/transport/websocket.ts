@@ -7,7 +7,7 @@
  */
 
 import type { ControlState, RemoteMessage } from '@rovelink/protocol';
-import { JSON_CODEC, PROTOCOL_VERSION, createControlFrame } from '@rovelink/protocol';
+import { CLOSE_CODE, JSON_CODEC, PROTOCOL_VERSION, createControlFrame } from '@rovelink/protocol';
 
 import type { Counters, RobotTransport, TransportListener } from './types.ts';
 import { INITIAL_COUNTS, Emitter } from './types.ts';
@@ -18,7 +18,8 @@ export interface WebSocketOptions {
   readonly robotId?: string;
   readonly pingMs?: number;
   readonly reconnectMs?: number;
-  /** Reserved for operator authentication (later phase). */
+  /** Operator credential entered at runtime (see web/src/auth/controller-key.ts).
+   * Never sourced from `VITE_*`: this is a live value, not a build-time one. */
   readonly token?: string;
 }
 
@@ -38,7 +39,9 @@ export class WebSocketTransport implements RobotTransport {
   readonly #url: string;
   readonly #pingMs: number;
   readonly #reconnectMs: number;
-  readonly #token?: string;
+  /** Not readonly: cleared on an auth-failed close so a stale/invalid
+   * credential can never be retried (see the 'close' handler in #open). */
+  #token?: string;
 
   #ws: WebSocket | null = null;
   #counters: Counters = INITIAL_COUNTS;
@@ -61,6 +64,17 @@ export class WebSocketTransport implements RobotTransport {
   }
 
   connect(): Promise<void> {
+    // Defense in depth: the login gate (control-view.ts) is what's supposed
+    // to keep this from ever being called without a credential, but a
+    // WebSocketTransport must never open the controller socket without one
+    // regardless of what called it.
+    if (!this.#token) {
+      this.#emitter.emit({
+        kind: 'auth-error',
+        text: 'no controller credential configured',
+      });
+      return Promise.resolve();
+    }
     this.#wantConnection = true;
     return new Promise((resolve) => {
       this.#open(resolve);
@@ -113,12 +127,24 @@ export class WebSocketTransport implements RobotTransport {
       this.#handle(message);
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event: CloseEvent) => {
       this.#stopHeartbeat();
       if (this.#ws !== ws) return;
       this.#ws = null;
       this.#emitter.emit({ kind: 'robot', online: false });
       this.#emitter.emit({ kind: 'state', state: 'disconnected' });
+
+      if (event.code === CLOSE_CODE.AUTH_FAILED) {
+        // The relay has told us this credential is wrong. Retrying would
+        // just hammer it with the same bad key forever, so stop entirely
+        // and let the UI send the operator back to the login prompt with a
+        // fresh one.
+        this.#wantConnection = false;
+        this.#token = undefined;
+        this.#emitter.emit({ kind: 'auth-error', text: 'invalid controller credential' });
+        return;
+      }
+
       if (this.#wantConnection) {
         this.#retry = setTimeout(() => this.#open(ready), this.#reconnectMs);
       }
@@ -137,6 +163,13 @@ export class WebSocketTransport implements RobotTransport {
         return;
       case 'pong':
         this.#emitter.emit({ kind: 'rtt', ms: Math.max(0, Date.now() - message.sentAt) });
+        return;
+      case 'controller.session':
+        // Relay-authored authoritative confirmation only (see room.ts
+        // #handleControllerRegister) — this type is never sent to a
+        // controller for any other reason, so no further check is needed
+        // here beyond having arrived on this authenticated connection.
+        this.#emitter.emit({ kind: 'session-established' });
         return;
       default:
         return;

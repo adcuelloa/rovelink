@@ -9,6 +9,7 @@
 
 import type { Gripper } from '@rovelink/protocol';
 
+import { clearControllerKey, getControllerKey } from './auth/controller-key.ts';
 import { ControlEngine } from './control/engine.ts';
 import { listenGamepad } from './control/gamepad.ts';
 import { listenKeyboard } from './control/keyboard.ts';
@@ -30,7 +31,15 @@ interface Axes {
   steering: number;
 }
 
-export function mountControl(app: HTMLElement): () => void {
+export interface ControlViewOptions {
+  /** The operator needs to (re-)enter a controller credential: either the
+   * relay rejected the current one (transport already stopped retrying and
+   * discarded it), or the operator explicitly logged out. Return to the
+   * login prompt. */
+  readonly onNeedsLogin: (reason: string) => void;
+}
+
+export function mountControl(app: HTMLElement, options: ControlViewOptions): () => void {
   app.innerHTML = CONTROL_TEMPLATE;
 
   const robotId = getConfiguredRobotId();
@@ -115,6 +124,23 @@ export function mountControl(app: HTMLElement): () => void {
       case 'alert':
         log(event.level, event.text);
         return;
+      case 'auth-error':
+        log('error', event.text);
+        clearControllerKey();
+        options.onNeedsLogin(event.text);
+        return;
+      case 'session-established':
+        // The relay just confirmed this connection is the authoritative
+        // control session. Reset local state to SAFE_STATE and force-send
+        // the disarmed baseline the device's session-readiness gate
+        // requires — see ControlSender.establishSessionBaseline(). This is
+        // the only place either of those happens: never on a bare connect,
+        // never on a room broadcast, only in direct response to the
+        // relay's own authoritative notification.
+        engine.safeState();
+        sender.establishSessionBaseline();
+        log('info', 'control session established — disarmed');
+        return;
     }
   }
 
@@ -143,7 +169,11 @@ export function mountControl(app: HTMLElement): () => void {
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
   } else {
-    transport = new WebSocketTransport({ url: relay, robotId });
+    transport = new WebSocketTransport({
+      url: relay,
+      robotId,
+      token: getControllerKey() ?? undefined,
+    });
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
 
@@ -225,6 +255,16 @@ export function mountControl(app: HTMLElement): () => void {
     () => {
       if (linked) transport.disconnect();
       else void transport.connect();
+    },
+    { signal },
+  );
+
+  $('#btn-logout', HTMLButtonElement).addEventListener(
+    'click',
+    () => {
+      transport.disconnect();
+      clearControllerKey();
+      options.onNeedsLogin('logged out');
     },
     { signal },
   );
