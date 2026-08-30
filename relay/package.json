@@ -8,14 +8,16 @@
     "deploy": "npx wrangler deploy",
     "typecheck": "oxlint --type-aware --type-check .",
     "build": "echo 'wrangler bundles at deploy time; typecheck verifies types'",
-    "test": "node --test src/*.test.ts"
+    "test": "node --test src/route.test.ts && vitest run"
   },
   "dependencies": {
     "@rovelink/protocol": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "4.20260101.0",
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260829.1",
     "@types/node": "26.4.0",
+    "vitest": "4.1.11",
     "wrangler": "4.127.1"
   }
 }
