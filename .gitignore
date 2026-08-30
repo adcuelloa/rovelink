@@ -8,5 +8,5 @@ dist/
 .playwright-mcp/
 
 # Firmware secrets (not versioned)
-firmware/wifi_secrets.h
-firmware/device_secrets.h
+firmware/rovelink_device/wifi_secrets.h
+firmware/rovelink_device/device_secrets.h
