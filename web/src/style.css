@@ -1,0 +1,392 @@
+@import 'tailwindcss';
+
+/*
+ * Archivo variable, weight axis only: 35 kB vs. 90 kB with width axis added,
+ * which at 0.6rem and with this letter-spacing is indistinguishable.
+ * Loads with `font-display: swap`, so doesn't delay first paint.
+ */
+
+/*
+ * Differential-drive robot control dashboard.
+ *
+ * Background is warm carbon and all data at rest is ice. Sodium orange is the
+ * only saturated color in the system and appears only when the vehicle can
+ * move: the screen heats up exactly when the car is dangerous. Danger stripes
+ * appear once, on emergency stop, because it's the only control we physically
+ * imitate.
+ */
+@theme {
+  --color-carbon: #131318;
+  --color-panel: #1a1a21;
+  --color-groove: #2a2a35;
+  --color-ice: #ccd2de;
+  --color-ice-2: #7c8497;
+  --color-sodium: #ff6a2b;
+  --color-alert: #e5342b;
+  --color-danger: #f0c000;
+
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, 'Cascadia Mono', monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-carbon text-ice antialiased;
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  /* Chassis milling: very fine lines, almost subliminal. */
+  background-image: repeating-linear-gradient(
+    115deg,
+    transparent 0 5px,
+    rgb(255 255 255 / 0.022) 5px 6px
+  );
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-sodium);
+  outline-offset: 2px;
+}
+
+@layer components {
+  /* --- silkscreened labels on the chassis --- */
+  .label {
+    @apply text-ice-2 text-[0.6rem] uppercase;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+  }
+
+  /* --- layout --- */
+
+  .console {
+    @apply mx-auto grid max-w-305 gap-3 px-3 py-3 sm:px-5 sm:py-5;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 60rem) {
+    .console {
+      grid-template-columns: minmax(0, 1.55fr) minmax(17rem, 1fr);
+      align-items: start;
+    }
+    .full-width {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .module {
+    @apply border-groove bg-panel rounded-md border;
+  }
+
+  /* Bus and controls share the narrow column; the chassis occupies the wide one. */
+  .column {
+    @apply grid content-start gap-3;
+  }
+
+  .module__header {
+    @apply border-groove flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2;
+  }
+
+  /* --- status rail --- */
+
+  .status-bar {
+    @apply border-groove bg-panel flex flex-wrap items-center gap-2 rounded-md border px-3 py-2;
+  }
+
+  .identifier {
+    font-family: var(--font-mono);
+    @apply text-ice mr-auto text-sm tracking-tight;
+  }
+
+  .identifier b {
+    @apply text-sodium font-semibold;
+  }
+
+  .status-light {
+    @apply border-groove text-ice-2 flex items-center gap-2 rounded border px-2.5 py-1 text-[0.62rem] uppercase;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+  }
+
+  .status-light::before {
+    content: '';
+    @apply size-1.5 rounded-full bg-current;
+  }
+
+  .status-light[data-on='true'] {
+    @apply border-groove/60 text-sodium;
+    box-shadow: inset 0 0 12px -6px var(--color-sodium);
+  }
+
+  /* --- chassis: top-down view of the cart, the main piece --- */
+
+  .chassis {
+    @apply relative w-full max-w-76;
+    aspect-ratio: 4 / 5;
+  }
+
+  /* Body with beveled nose: the gripper goes out there. */
+  .chassis__body {
+    @apply absolute overflow-hidden border border-white/12;
+    inset: 6% 22% 4%;
+    /* Elliptical nose and straight tail: `clip-path` cut the edge. */
+    border-radius: 48% 48% 10% 10% / 16% 16% 4% 4%;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 45%), var(--color-panel);
+    transition: border-color 200ms ease-out;
+  }
+
+  .chassis[data-armed='true'] .chassis__body {
+    border-color: color-mix(in oklab, var(--color-sodium) 60%, var(--color-groove));
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    50% {
+      box-shadow: inset 0 0 18px -14px var(--color-sodium);
+    }
+  }
+
+  .chassis__axle {
+    @apply bg-groove absolute inset-x-0 h-px;
+  }
+
+  .chassis__centerline {
+    @apply bg-groove absolute inset-y-[12%] left-1/2 w-px;
+  }
+
+  /* Each wheel bites the body edge, just like in the real car. */
+  .wheel {
+    --m: 0;
+    @apply absolute overflow-hidden rounded-[5px] border border-white/15 bg-white/[0.07];
+    width: 17%;
+    height: 21%;
+  }
+
+  .wheel--left {
+    left: 12%;
+  }
+  .wheel--right {
+    right: 12%;
+  }
+  .wheel--front {
+    top: 14%;
+  }
+  .wheel--rear {
+    bottom: 12%;
+  }
+
+  /* Rest line: a wheel at zero still reads as a wheel. */
+  .wheel__axle {
+    @apply absolute inset-x-0 top-1/2 h-px bg-white/20;
+  }
+
+  .wheel__power {
+    @apply bg-ice-2 absolute inset-x-0;
+    height: 50%;
+    top: 50%;
+    transform-origin: 50% 0;
+    transform: scaleY(var(--m));
+  }
+
+  /* Forward the bar grows toward the nose; in reverse, backward. */
+  .wheel[data-direction='forward'] .wheel__power {
+    top: 0;
+    transform-origin: 50% 100%;
+  }
+
+  .chassis[data-armed='true'] .wheel__power {
+    @apply bg-sodium;
+  }
+
+  .gripper {
+    --a: 10deg;
+    @apply absolute flex justify-center gap-2;
+    top: 1.5%;
+    left: 36%;
+    right: 36%;
+    height: 7%;
+  }
+
+  .gripper__jaw {
+    @apply bg-ice-2 block w-1 rounded-full;
+    height: 100%;
+    transition: transform 140ms ease-out;
+  }
+
+  .gripper__jaw:first-child {
+    transform-origin: 50% 100%;
+    transform: rotate(calc(var(--a) * -1));
+  }
+
+  .gripper__jaw:last-child {
+    transform-origin: 50% 100%;
+    transform: rotate(var(--a));
+  }
+
+  .gripper[data-gripper='close'] .gripper__jaw {
+    @apply bg-sodium;
+  }
+
+  /* --- large readings and stick --- */
+
+  .readings {
+    @apply border-groove grid grid-cols-2 items-start gap-x-3 gap-y-4 border-t px-3 py-3 sm:grid-cols-4;
+  }
+
+  .reading__value {
+    font-family: var(--font-mono);
+    @apply text-ice text-[1.5rem] leading-none tabular-nums;
+  }
+
+  [data-armed='true'] .reading__value {
+    @apply text-sodium;
+  }
+
+  .pad {
+    @apply border-groove relative size-16 rounded border;
+    background: radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.05), transparent 70%);
+  }
+
+  .pad__crosshair {
+    @apply pointer-events-none absolute inset-0;
+    background-image:
+      linear-gradient(to right, var(--color-groove) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-groove) 1px, transparent 1px);
+    background-position: center;
+    background-size:
+      100% 50%,
+      50% 100%;
+  }
+
+  .pad__dot {
+    --x: 0;
+    --y: 0;
+    @apply bg-ice absolute size-2.5 rounded-full;
+    left: calc(50% - 0.3125rem);
+    top: calc(50% - 0.3125rem);
+    transform: translate(calc(var(--x) * 1.35rem), calc(var(--y) * 1.35rem));
+  }
+
+  [data-armed='true'] .pad__dot {
+    @apply bg-sodium;
+  }
+
+  /* --- button panel --- */
+
+  .button {
+    @apply border-groove text-ice min-h-11 cursor-pointer rounded border bg-white/5 px-4 text-[0.68rem] uppercase;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    @apply hover:border-ice-2 disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  .button[aria-pressed='true'] {
+    @apply border-sodium bg-sodium text-carbon;
+  }
+
+  /* The only control we physically imitate: emergency stop button with stripes. */
+  .e_stop {
+    @apply text-ice relative min-h-11 w-full cursor-pointer rounded border-0 px-6 text-[0.72rem] uppercase;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    background: var(--color-alert);
+    box-shadow:
+      inset 0 -3px 0 rgb(0 0 0 / 0.45),
+      0 2px 0 rgb(0 0 0 / 0.5);
+  }
+
+  .e_stop::before,
+  .e_stop::after {
+    content: '';
+    @apply absolute inset-y-0 w-2;
+    background: repeating-linear-gradient(-45deg, var(--color-danger) 0 6px, #1a1a1a 6px 12px);
+  }
+
+  .e_stop::before {
+    left: 0;
+    border-radius: 0.25rem 0 0 0.25rem;
+  }
+
+  .e_stop::after {
+    right: 0;
+    border-radius: 0 0.25rem 0.25rem 0;
+  }
+
+  .e_stop:active {
+    transform: translateY(2px);
+    box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.45);
+  }
+
+  /* --- touch controls --- */
+
+  .touch_controls {
+    @apply grid gap-1.5 p-3;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .key {
+    font-family: var(--font-mono);
+    @apply border-groove text-ice min-h-12 cursor-pointer rounded border bg-white/5 text-base select-none;
+    @apply hover:border-ice-2 active:bg-sodium active:text-carbon;
+    touch-action: none;
+  }
+
+  .key--wide {
+    @apply col-span-2 text-[0.68rem] uppercase;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+  }
+
+  /* --- telemetry bus --- */
+
+  .bus {
+    @apply grid gap-x-3 gap-y-2.5 p-3;
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  }
+
+  .bus__data {
+    @apply border-groove border-t pt-1.5;
+  }
+
+  .bus__value {
+    font-family: var(--font-mono);
+    @apply text-ice text-[0.95rem] tabular-nums;
+  }
+
+  .field {
+    font-family: var(--font-mono);
+    @apply border-groove bg-carbon text-ice rounded border px-2 py-1 text-xs;
+    @apply focus:border-sodium outline-none;
+  }
+
+  /* --- log --- */
+
+  .log {
+    font-family: var(--font-mono);
+    @apply h-36 overflow-y-auto px-3 py-2 text-[0.7rem] leading-relaxed;
+  }
+
+  .log li {
+    @apply text-ice-2 border-l-2 border-transparent pl-2;
+  }
+
+  .log li[data-level='ok'] {
+    @apply border-sodium/70 text-ice;
+  }
+
+  .log li[data-level='error'] {
+    @apply border-alert text-alert;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

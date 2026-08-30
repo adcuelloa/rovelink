@@ -1,0 +1,287 @@
+/**
+ * Remote control dashboard.
+ *
+ *   keyboard / gamepad / touch → ControlEngine → ControlSender → RobotTransport
+ *
+ * This view only wires the layers and paints: it does not compute axes or
+ * speak the protocol, so changing transport does not touch it.
+ */
+
+import type { Gripper } from '@rovelink/protocol';
+
+import { ControlEngine } from './control/engine.ts';
+import { listenGamepad } from './control/gamepad.ts';
+import { listenKeyboard } from './control/keyboard.ts';
+import { MockTransport } from './transport/mock.ts';
+import { ControlSender } from './transport/sender.ts';
+import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
+import {
+  getConfiguredRobotId,
+  getConfiguredRelayUrl,
+  WebSocketTransport,
+} from './transport/websocket.ts';
+import { CONTROL_TEMPLATE } from './ui/control-template.ts';
+import { $ } from './ui/dom.ts';
+import { Instruments } from './ui/instruments.ts';
+
+type TransportName = 'mock' | 'websocket';
+
+const MAX_EVENTS = 40;
+
+interface Axes {
+  throttle: number;
+  steering: number;
+}
+
+export function mountControl(app: HTMLElement): () => void {
+  app.innerHTML = CONTROL_TEMPLATE;
+
+  const robotId = getConfiguredRobotId();
+  $('#robot-id-value', HTMLElement).textContent = robotId;
+
+  const instruments = new Instruments();
+  const engine = new ControlEngine();
+  const logList = $('#log-control', HTMLOListElement);
+  const announcements = $('#announcements-control', HTMLElement);
+  const selector = $('#transport-selector', HTMLSelectElement);
+  const linkButton = $('#btn-link', HTMLButtonElement);
+
+  const relay = getConfiguredRelayUrl();
+  if (relay === undefined) {
+    const option = [...selector.options].find((o) => o.value === 'websocket');
+    if (option !== undefined) {
+      option.disabled = true;
+      option.textContent = 'WebSocket (not configured)';
+    }
+  }
+
+  function log(level: AlertLevel, text: string): void {
+    const li = document.createElement('li');
+    li.dataset.level = level;
+    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    li.textContent = `${time}  ${text}`;
+    logList.prepend(li);
+    while (logList.childElementCount > MAX_EVENTS) logList.lastElementChild?.remove();
+  }
+
+  // --- inputs ---------------------------------------------------------------
+  // Three sources add to the same axes; the engine clamps to -1..1. With none
+  // touched they contribute 0, so they do not interfere with each other.
+  const keyInput: Axes = { throttle: 0, steering: 0 };
+  const touchInput: Axes = { throttle: 0, steering: 0 };
+  const gamepadInput: Axes = { throttle: 0, steering: 0 };
+  const grippers: Record<'keyboard' | 'touch' | 'gamepad', Gripper> = {
+    keyboard: 'idle',
+    touch: 'idle',
+    gamepad: 'idle',
+  };
+
+  const applyAxes = (): void =>
+    engine.axes(
+      keyInput.throttle + touchInput.throttle + gamepadInput.throttle,
+      keyInput.steering + touchInput.steering + gamepadInput.steering,
+    );
+
+  function applyGripper(): void {
+    const values = [grippers.gamepad, grippers.keyboard, grippers.touch];
+    engine.gripper(values.find((v) => v !== 'idle') ?? 'idle');
+  }
+
+  // --- transport ------------------------------------------------------------
+  let transport: RobotTransport = new MockTransport({ robotId });
+  let sender = new ControlSender(transport);
+  let linked = false;
+
+  function handleTransport(event: TransportEvent): void {
+    switch (event.kind) {
+      case 'state':
+        instruments.update({ connection: event.state });
+        linkButton.textContent = event.state === 'disconnected' ? 'Connect' : 'Disconnect';
+        linked = event.state !== 'disconnected';
+        if (event.state === 'disconnected') {
+          engine.safeState();
+          sender.reset();
+        }
+        return;
+      case 'robot':
+        instruments.update({ robotOnline: event.online });
+        return;
+      case 'rtt':
+        instruments.update({ rtt: event.ms });
+        return;
+      case 'telemetry':
+        instruments.update({
+          rssi: event.data.rssi ?? null,
+          telThrottle: event.data.throttle ?? 0,
+          telSteering: event.data.steering ?? 0,
+        });
+        return;
+      case 'counters':
+        instruments.update({
+          sent: event.data.sent,
+          received: event.data.received,
+          seq: event.data.seq,
+        });
+        return;
+      case 'alert':
+        log(event.level, event.text);
+        return;
+    }
+  }
+
+  let unsubscribeTransport = transport.subscribe(handleTransport);
+
+  function create(name: TransportName): RobotTransport {
+    if (name === 'websocket' && relay !== undefined) {
+      return new WebSocketTransport({ url: relay, robotId });
+    }
+    return new MockTransport({ robotId });
+  }
+
+  function useTransport(name: TransportName): void {
+    sender.stop();
+    unsubscribeTransport();
+    transport.disconnect();
+
+    transport = create(name);
+    sender = new ControlSender(transport);
+    unsubscribeTransport = transport.subscribe(handleTransport);
+    instruments.update({
+      transport: transport.name,
+      rtt: null,
+      rssi: null,
+      seq: 0,
+      sent: 0,
+      received: 0,
+    });
+    log('info', `transport: ${transport.name}`);
+    sender.start(() => engine.state);
+    void transport.connect();
+  }
+
+  // --- wiring ---------------------------------------------------------------
+  const unsubscribeEngine = engine.subscribe(({ state, reason }) => {
+    instruments.update({
+      throttle: state.throttle,
+      steering: state.steering,
+      gripper: state.gripper,
+      armed: state.armed,
+    });
+    if (reason === 'arm') {
+      announcements.textContent = state.armed ? 'Armed' : 'Disarmed';
+      log('info', state.armed ? 'armed' : 'disarmed');
+    }
+    sender.update(state);
+  });
+
+  const unsubscribeKeyboard = listenKeyboard(window, {
+    onAxes: (axes) => {
+      keyInput.throttle = axes.throttle;
+      keyInput.steering = axes.steering;
+      applyAxes();
+    },
+    onGripper: (gripper) => {
+      grippers.keyboard = gripper;
+      applyGripper();
+    },
+    onAction: (action) => {
+      if (action === 'stop') emergencyStop();
+      else if (action === 'toggleArm') engine.toggleArm();
+    },
+  });
+
+  const unsubscribeGamepad = listenGamepad(window, {
+    onAxes: (throttle, steering) => {
+      gamepadInput.throttle = throttle;
+      gamepadInput.steering = steering;
+      applyAxes();
+    },
+    onGripper: (gripper) => {
+      grippers.gamepad = gripper;
+      applyGripper();
+    },
+    onAction: (action) => {
+      if (action === 'stop') emergencyStop();
+      else if (action === 'arm') engine.arm(true);
+      else if (action === 'disarm') engine.arm(false);
+    },
+    onState: (state) => {
+      instruments.update({ gamepad: state.connected ? state.id : 'not detected' });
+      log('info', state.connected ? `gamepad: ${state.id}` : 'gamepad disconnected');
+    },
+  });
+
+  function emergencyStop(): void {
+    engine.emergencyStop();
+    sender.emergencyStop();
+    announcements.textContent = 'Emergency stop';
+    log('error', 'EMERGENCY STOP');
+  }
+
+  const abort = new AbortController();
+  const { signal } = abort;
+
+  $('#btn-arm', HTMLButtonElement).addEventListener('click', () => engine.arm(true), { signal });
+  $('#btn-disarm', HTMLButtonElement).addEventListener('click', () => engine.arm(false), {
+    signal,
+  });
+  $('#btn-stop', HTMLButtonElement).addEventListener('click', emergencyStop, { signal });
+
+  linkButton.addEventListener(
+    'click',
+    () => {
+      if (linked) transport.disconnect();
+      else void transport.connect();
+    },
+    { signal },
+  );
+
+  selector.addEventListener(
+    'change',
+    () => useTransport(selector.value === 'websocket' ? 'websocket' : 'mock'),
+    { signal },
+  );
+
+  // Touch buttons: active while held, same as keyboard.
+  for (const button of app.querySelectorAll<HTMLButtonElement>('.key')) {
+    const axis = button.dataset.axis;
+    const gripper = button.dataset.gripper;
+    const release = (): void => {
+      if (axis === 'throttle') touchInput.throttle = 0;
+      if (axis === 'steering') touchInput.steering = 0;
+      if (gripper !== undefined) grippers.touch = 'idle';
+      applyAxes();
+      applyGripper();
+    };
+    button.addEventListener(
+      'pointerdown',
+      (event: PointerEvent) => {
+        button.setPointerCapture(event.pointerId);
+        const value = Number(button.dataset.value ?? 0);
+        if (axis === 'throttle') touchInput.throttle = value;
+        if (axis === 'steering') touchInput.steering = value;
+        if (gripper === 'open' || gripper === 'close') grippers.touch = gripper;
+        applyAxes();
+        applyGripper();
+      },
+      { signal },
+    );
+    button.addEventListener('pointerup', release, { signal });
+    button.addEventListener('pointercancel', release, { signal });
+  }
+
+  log('info', `transport: ${transport.name}`);
+  sender.start(() => engine.state);
+  void transport.connect();
+
+  return () => {
+    abort.abort();
+    unsubscribeKeyboard();
+    unsubscribeGamepad();
+    unsubscribeEngine();
+    sender.stop();
+    unsubscribeTransport();
+    transport.disconnect();
+    instruments.destroy();
+  };
+}

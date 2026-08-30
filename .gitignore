@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.local
+
+# Test artifacts
+.playwright-mcp/
+
+# Firmware secrets (not versioned)
+firmware/wifi_secrets.h
+firmware/device_secrets.h

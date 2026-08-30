@@ -1,0 +1,17 @@
+{
+  "name": "@rovelink/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "typecheck": "oxlint --type-aware --type-check .",
+    "build": "echo 'no build needed; typecheck verifies types'"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0"
+  }
+}

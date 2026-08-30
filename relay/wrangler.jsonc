@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rovelink-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": { "enabled": true },
+  // One room per robot: the Durable Object id comes from the robot name.
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RobotRoom" }],
+  },
+  // SQLite classes: what the free plan supports for Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RobotRoom"] }],
+}

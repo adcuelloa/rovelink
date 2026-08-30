@@ -1,0 +1,21 @@
+{
+  "name": "@rovelink/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "oxlint --type-aware --type-check .",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test src/control/*.test.ts src/transport/*.test.ts"
+  },
+  "dependencies": {
+    "@rovelink/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.2.0"
+  }
+}

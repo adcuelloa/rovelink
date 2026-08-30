@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.base.json",
+  // `node` is only needed for the routing unit tests; the Worker
+  // itself is compiled against Workers types.
+  "compilerOptions": { "lib": ["ES2023"], "types": ["@cloudflare/workers-types", "node"] },
+  "include": ["src"]
+}

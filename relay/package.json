@@ -1,0 +1,21 @@
+{
+  "name": "@rovelink/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "oxlint --type-aware --type-check .",
+    "build": "echo 'wrangler bundles at deploy time; typecheck verifies types'",
+    "test": "node --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@rovelink/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "@types/node": "^26.4.0",
+    "wrangler": "^4.127.1"
+  }
+}
