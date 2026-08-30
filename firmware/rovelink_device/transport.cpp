@@ -151,9 +151,38 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
   case WStype_CONNECTED:
     onConnect();
     break;
+
   case WStype_TEXT:
     handleText(payload, length);
     break;
+
+  case WStype_DISCONNECTED:
+    Serial.print("[WSS] disconnected");
+
+    if (payload != nullptr && length > 0)
+    {
+      Serial.print(" reason=");
+      Serial.write(payload, length);
+    }
+
+    Serial.println();
+
+    connected = false;
+    registered = false;
+    break;
+
+  case WStype_ERROR:
+    Serial.print("[WSS] error");
+
+    if (payload != nullptr && length > 0)
+    {
+      Serial.print(" reason=");
+      Serial.write(payload, length);
+    }
+
+    Serial.println();
+    break;
+
   default:
     break;
   }
