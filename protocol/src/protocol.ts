@@ -15,6 +15,27 @@ export const PROTOCOL_VERSION = 1;
 export type Role = 'controller' | 'device';
 
 /**
+ * Private application WebSocket close codes (4000-4999 range) used by the
+ * relay. Shared here so the relay, web client, and any test client agree on
+ * the same numbers instead of duplicating magic constants.
+ */
+export const CLOSE_CODE = {
+  /** A live duplicate for the same role was rejected, or a stale one was
+   * reclaimed: see the `reason` string sent alongside for which. */
+  OCCUPIED: 4001,
+  /** An authenticated device registration replaced this (now former)
+   * device connection immediately, without waiting for its lease to expire. */
+  DEVICE_REPLACED: 4002,
+  /** `token` on `device.register` / `controller.register` was missing or
+   * did not match the configured credential. The reason never repeats the
+   * expected value. */
+  AUTH_FAILED: 4003,
+  /** Accepted but never sent a valid registration within the bounded
+   * pending window. */
+  REGISTRATION_TIMEOUT: 4004,
+} as const;
+
+/**
  * Default TTL of a driving frame: after that time it is no longer obeyed.
  *
  * Must stay well above the sender's heartbeat cadence (`DEFAULT_RHYTHM.heartbeatMs`
@@ -48,13 +69,38 @@ export interface ControlFrame extends Envelope, ControlState {
   readonly seq: number;
   readonly sentAt: number;
   readonly ttlMs: number;
+  /**
+   * Which control session this frame belongs to. The browser never sets
+   * this — it has no authority to declare its own session — the relay
+   * stamps it on every frame it forwards to the device, from the id it
+   * minted when that controller was promoted (see `ControlSession`). Absent
+   * only on the browser->relay leg, where it doesn't exist yet.
+   */
+  readonly controlSessionId?: string;
+}
+
+/**
+ * Relay-authored only: tells the device which control session is now
+ * authoritative. A `ControlFrame` can never establish or change this by
+ * itself (see room.ts #handleControllerRegister / #handleDeviceRegister) —
+ * that's what stops a delayed frame from an old session rolling the
+ * device's active session backward.
+ */
+export interface ControlSession extends Envelope {
+  readonly type: 'controller.session';
+  readonly robotId: string;
+  readonly sessionId: string;
 }
 
 export interface Telemetry extends Envelope {
   readonly type: 'telemetry';
   readonly sentAt: number;
-  /** Last `seq` of control applied by the vehicle. */
+  /** Last `seq` of control applied by the vehicle, within `ackSessionId`. */
   readonly ackSeq?: number;
+  /** Which control session `ackSeq` belongs to. Without this, `ackSeq` from
+   * two different sessions is ambiguous (both can legitimately be small
+   * numbers). */
+  readonly ackSessionId?: string;
   readonly rssi?: number;
   readonly battery?: number;
   readonly throttle?: number;
@@ -94,6 +140,7 @@ export type RemoteMessage =
   | DeviceRegistration
   | ControllerRegistration
   | ControlFrame
+  | ControlSession
   | Telemetry
   | Ping
   | Pong
@@ -128,7 +175,8 @@ function isControlFrame(m: Record<string, unknown>): boolean {
     isNumber(m.throttle) &&
     isNumber(m.steering) &&
     isGripper(m.gripper) &&
-    typeof m.armed === 'boolean'
+    typeof m.armed === 'boolean' &&
+    isOptionalString(m.controlSessionId)
   );
 }
 
@@ -149,8 +197,15 @@ export function isRemoteMessage(value: unknown): value is RemoteMessage {
       return typeof m.robotId === 'string' && isOptionalString(m.token);
     case 'control':
       return isControlFrame(m);
+    case 'controller.session':
+      return typeof m.robotId === 'string' && typeof m.sessionId === 'string';
     case 'telemetry':
-      return isNumber(m.sentAt) && isOptionalNumber(m.ackSeq) && isOptionalNumber(m.rssi);
+      return (
+        isNumber(m.sentAt) &&
+        isOptionalNumber(m.ackSeq) &&
+        isOptionalString(m.ackSessionId) &&
+        isOptionalNumber(m.rssi)
+      );
     case 'ping':
       return isNumber(m.id) && isNumber(m.sentAt);
     case 'pong':

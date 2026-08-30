@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { normalizeState } from './control.ts';
 import {
+  CLOSE_CODE,
   CONTROL_TTL_MS,
   PROTOCOL_VERSION,
   createControlFrame,
@@ -68,4 +69,39 @@ test('protocol: registration, telemetry, pong, emergency stop, and room', () => 
     true,
   );
   assert.equal(isRemoteMessage({ v: 1, type: 'device.register' }), false);
+});
+
+test('protocol: close codes are distinct 4000-range values', () => {
+  const codes = Object.values(CLOSE_CODE);
+  assert.equal(new Set(codes).size, codes.length);
+  for (const code of codes) assert.ok(code >= 4000 && code < 5000);
+});
+
+test('protocol: controller.session is relay-authored, not client-inventable freely', () => {
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'controller.session', robotId: 'robot-01', sessionId: 'abc' }),
+    true,
+  );
+  assert.equal(isRemoteMessage({ v: 1, type: 'controller.session', robotId: 'robot-01' }), false);
+  assert.equal(isRemoteMessage({ v: 1, type: 'controller.session', sessionId: 'abc' }), false);
+});
+
+test('protocol: a control frame may carry an optional controlSessionId', () => {
+  const withSession = { ...createControlFrame(state, 1, 1000), controlSessionId: 'session-a' };
+  assert.equal(isRemoteMessage(withSession), true);
+  // Browser-authored frames omit it entirely (the relay stamps it later) —
+  // that must still be a structurally valid frame, not a rejected one.
+  assert.equal(isRemoteMessage(createControlFrame(state, 1, 1000)), true);
+  assert.equal(
+    isRemoteMessage({ ...createControlFrame(state, 1, 1000), controlSessionId: 42 }),
+    false,
+  );
+});
+
+test('protocol: telemetry may carry an optional ackSessionId alongside ackSeq', () => {
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'telemetry', sentAt: 5, ackSeq: 3, ackSessionId: 'session-a' }),
+    true,
+  );
+  assert.equal(isRemoteMessage({ v: 1, type: 'telemetry', sentAt: 5, ackSessionId: 7 }), false);
 });
