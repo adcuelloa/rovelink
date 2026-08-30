@@ -84,6 +84,13 @@ export interface KeyboardHandlers {
   readonly onAxes: (axes: Axes) => void;
   readonly onGripper: (gripper: Gripper) => void;
   readonly onAction: (action: KeyAction) => void;
+  /**
+   * Fired once per relevant keydown (held or instant), never on keyup. This
+   * exists purely so a caller can tell "keyboard was just used" apart from
+   * "the axes were recomputed because a key was released" — see
+   * control-view.ts's input-source ownership.
+   */
+  readonly onActivity?: () => void;
 }
 
 /** Listens to the keyboard and translates to axes and actions. Returns an unsubscribe function. */
@@ -104,6 +111,7 @@ export function listenKeyboard(target: Window, handlers: KeyboardHandlers): () =
       const action = actionForKey(event.code);
       if (action === null) return;
       event.preventDefault();
+      handlers.onActivity?.();
       if (isHeld(action)) {
         active.add(action);
         publish();

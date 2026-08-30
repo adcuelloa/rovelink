@@ -32,6 +32,35 @@ export interface GamepadHandlers {
   readonly onState: (state: GamepadState) => void;
 }
 
+/** The subset of a `Gamepad` this module actually reads. */
+export interface GamepadLike {
+  readonly index: number;
+  readonly id: string;
+  readonly mapping: string;
+  readonly axes: readonly number[];
+  /** `value` (0..1) is the analog trigger depth — used for R2/L2 throttle. */
+  readonly buttons: readonly { readonly pressed: boolean; readonly value: number }[];
+}
+
+interface GamepadLikeEvent {
+  readonly gamepad: GamepadLike;
+}
+
+/**
+ * The subset of `window` this module actually needs — not the whole DOM
+ * `Window` — so a test can fake it without touching a real browser global.
+ */
+export interface GamepadTarget {
+  readonly navigator: { getGamepads(): readonly (GamepadLike | null)[] };
+  addEventListener(
+    type: 'gamepadconnected' | 'gamepaddisconnected',
+    listener: (event: GamepadLikeEvent) => void,
+    options: { signal: AbortSignal },
+  ): void;
+  requestAnimationFrame(callback: (time: number) => void): number;
+  cancelAnimationFrame(handle: number): void;
+}
+
 export interface GamepadOptions {
   readonly mapping?: GamepadMapping;
   readonly deadzone?: Deadzone;
@@ -51,12 +80,24 @@ function copyAxes(dest: number[], src: readonly number[]): boolean {
   return changed;
 }
 
-function copyButtons(dest: boolean[], src: readonly GamepadButton[]): boolean {
-  let changed = dest.length !== src.length;
-  dest.length = src.length;
+function copyButtons(
+  destPressed: boolean[],
+  destValues: number[],
+  src: GamepadLike['buttons'],
+): boolean {
+  let changed = destPressed.length !== src.length;
+  destPressed.length = src.length;
+  destValues.length = src.length;
   for (const [i, button] of src.entries()) {
-    if (dest[i] !== button.pressed) {
-      dest[i] = button.pressed;
+    if (destPressed[i] !== button.pressed) {
+      destPressed[i] = button.pressed;
+      changed = true;
+    }
+    // Analog trigger depth can change without crossing the `pressed`
+    // threshold — that continuous value drives throttle, so a value-only
+    // change must still count as "changed" and get published.
+    if (destValues[i] !== button.value) {
+      destValues[i] = button.value;
       changed = true;
     }
   }
@@ -68,7 +109,7 @@ function copyButtons(dest: boolean[], src: readonly GamepadButton[]): boolean {
  * the animation loop does not spin idle. Returns an unsubscribe function.
  */
 export function listenGamepad(
-  target: Window,
+  target: GamepadTarget,
   handlers: GamepadHandlers,
   options: GamepadOptions = {},
 ): () => void {
@@ -79,7 +120,8 @@ export function listenGamepad(
   // Reused each frame: the loop must not allocate per frame.
   const rawAxes: number[] = [];
   const rawButtons: boolean[] = [];
-  const reading = { axes: rawAxes, buttons: rawButtons };
+  const rawButtonValues: number[] = [];
+  const reading = { axes: rawAxes, buttons: rawButtons, buttonValues: rawButtonValues };
 
   let prevButtons: Readonly<Record<ButtonAction, boolean>> = BUTTONS_RELEASED;
   let publishedGripper: Gripper = 'idle';
@@ -89,7 +131,7 @@ export function listenGamepad(
   let animation: number | null = null;
   const abort = new AbortController();
 
-  const active = (): Gamepad | null => {
+  const active = (): GamepadLike | null => {
     if (index === null) return null;
     return target.navigator.getGamepads()[index] ?? null;
   };
@@ -122,14 +164,28 @@ export function listenGamepad(
     const gamepad = active();
     if (gamepad === null) return;
     const axesChanged = copyAxes(rawAxes, gamepad.axes);
-    const buttonsChanged = copyButtons(rawButtons, gamepad.buttons);
+    const buttonsChanged = copyButtons(rawButtons, rawButtonValues, gamepad.buttons);
     if (!axesChanged && !buttonsChanged) return;
     publish(readGamepad(reading, mapping, deadzone));
   }
 
-  function start(gamepad: Gamepad): void {
+  function start(gamepad: GamepadLike): void {
     index = gamepad.index;
     handlers.onState({ connected: true, id: gamepad.id, mapping: gamepad.mapping });
+    // Baseline whatever the stick/buttons read at the instant of connection
+    // — including a button that happens to already be held, or an axis
+    // that happens to already be off-center — so it is never itself
+    // reported as movement or a fresh button edge. Only a *change* from
+    // this baseline publishes. Without this, the reused rawAxes/rawButtons
+    // buffers start empty, so the very first sample always looks "changed"
+    // purely from array-length mismatch, regardless of the actual reading.
+    copyAxes(rawAxes, gamepad.axes);
+    copyButtons(rawButtons, rawButtonValues, gamepad.buttons);
+    const baseline = readGamepad(reading, mapping, deadzone);
+    prevButtons = baseline.buttons;
+    publishedThrottle = baseline.throttle;
+    publishedSteering = baseline.steering;
+    publishedGripper = gripperFromButtons(baseline.buttons);
     if (animation === null) animation = target.requestAnimationFrame(sample);
   }
 
@@ -148,7 +204,7 @@ export function listenGamepad(
 
   target.addEventListener(
     'gamepadconnected',
-    (event: GamepadEvent) => {
+    (event) => {
       if (index === null) start(event.gamepad);
     },
     { signal: abort.signal },
@@ -156,7 +212,7 @@ export function listenGamepad(
 
   target.addEventListener(
     'gamepaddisconnected',
-    (event: GamepadEvent) => {
+    (event) => {
       if (event.gamepad.index === index) stop();
     },
     { signal: abort.signal },

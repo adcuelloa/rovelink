@@ -7,12 +7,13 @@
  * speak the protocol, so changing transport does not touch it.
  */
 
-import type { Gripper } from '@rovelink/protocol';
-
 import { clearControllerKey, getControllerKey } from './auth/controller-key.ts';
 import { ControlEngine } from './control/engine.ts';
-import { listenGamepad } from './control/gamepad.ts';
+import { listenGamepad, NO_GAMEPAD } from './control/gamepad.ts';
+import type { GamepadState } from './control/gamepad.ts';
 import { listenKeyboard } from './control/keyboard.ts';
+import { normalizeGamepadName } from './control/mapping.ts';
+import { InputOwnership } from './control/ownership.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
 import {
@@ -25,11 +26,6 @@ import { $ } from './ui/dom.ts';
 import { Instruments } from './ui/instruments.ts';
 
 const MAX_EVENTS = 40;
-
-interface Axes {
-  throttle: number;
-  steering: number;
-}
 
 export interface ControlViewOptions {
   /** The operator needs to (re-)enter a controller credential: either the
@@ -63,27 +59,25 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   }
 
   // --- inputs ---------------------------------------------------------------
-  // Three sources add to the same axes; the engine clamps to -1..1. With none
-  // touched they contribute 0, so they do not interfere with each other.
-  const keyInput: Axes = { throttle: 0, steering: 0 };
-  const touchInput: Axes = { throttle: 0, steering: 0 };
-  const gamepadInput: Axes = { throttle: 0, steering: 0 };
-  const grippers: Record<'keyboard' | 'touch' | 'gamepad', Gripper> = {
-    keyboard: 'idle',
-    touch: 'idle',
-    gamepad: 'idle',
-  };
+  // Exactly one source owns throttle/steering/gripper at a time — see
+  // ownership.ts. Each source's "meaningful activity" rule (what makes it
+  // claim ownership) is a one-line conditional at that source's own wiring
+  // below.
+  const ownership = new InputOwnership();
+  let gamepadState: GamepadState = NO_GAMEPAD;
 
-  const applyAxes = (): void =>
-    engine.axes(
-      keyInput.throttle + touchInput.throttle + gamepadInput.throttle,
-      keyInput.steering + touchInput.steering + gamepadInput.steering,
-    );
-
-  function applyGripper(): void {
-    const values = [grippers.gamepad, grippers.keyboard, grippers.touch];
-    engine.gripper(values.find((v) => v !== 'idle') ?? 'idle');
+  function updateGamepadStatus(): void {
+    if (!gamepadState.connected) {
+      instruments.update({ gamepad: 'not detected' });
+      return;
+    }
+    const name = normalizeGamepadName(gamepadState.id);
+    const suffix = ownership.active === 'gamepad' ? 'active' : 'connected';
+    instruments.update({ gamepad: `${name} — ${suffix}` });
   }
+
+  const applyAxes = (): void => engine.axes(ownership.axes.throttle, ownership.axes.steering);
+  const applyGripper = (): void => engine.gripper(ownership.gripper);
 
   // --- transport ------------------------------------------------------------
   let transport: RobotTransport;
@@ -199,38 +193,70 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
 
   const unsubscribeKeyboard = listenKeyboard(window, {
     onAxes: (axes) => {
-      keyInput.throttle = axes.throttle;
-      keyInput.steering = axes.steering;
+      ownership.setAxes('keyboard', axes);
       applyAxes();
     },
     onGripper: (gripper) => {
-      grippers.keyboard = gripper;
+      ownership.setGripper('keyboard', gripper);
       applyGripper();
     },
     onAction: (action) => {
       if (action === 'stop') emergencyStop();
       else if (action === 'toggleArm') engine.toggleArm();
     },
+    // Fires only on keydown, never on keyup — releasing a key must not steal
+    // ownership away from whatever source is currently active.
+    onActivity: () => {
+      ownership.claim('keyboard');
+      updateGamepadStatus();
+    },
   });
 
   const unsubscribeGamepad = listenGamepad(window, {
     onAxes: (throttle, steering) => {
-      gamepadInput.throttle = throttle;
-      gamepadInput.steering = steering;
+      ownership.setAxes('gamepad', { throttle, steering });
+      // Values here are already deadzoned: nonzero means real, meaningful
+      // stick movement, not idle RAF sampling or sub-deadzone drift.
+      if (throttle !== 0 || steering !== 0) ownership.claim('gamepad');
+      updateGamepadStatus();
       applyAxes();
     },
     onGripper: (gripper) => {
-      grippers.gamepad = gripper;
+      ownership.setGripper('gamepad', gripper);
+      // Only becoming active claims ownership; releasing back to idle must
+      // not steal control from whatever source is now driving.
+      if (gripper !== 'idle') ownership.claim('gamepad');
+      updateGamepadStatus();
       applyGripper();
     },
     onAction: (action) => {
+      // Arm/Disarm/E-stop button edges count as meaningful gamepad activity
+      // too, but stay globally effective regardless of who "owns" the axes.
+      ownership.claim('gamepad');
+      updateGamepadStatus();
       if (action === 'stop') emergencyStop();
       else if (action === 'arm') engine.arm(true);
       else if (action === 'disarm') engine.arm(false);
     },
     onState: (state) => {
-      instruments.update({ gamepad: state.connected ? state.id : 'not detected' });
-      log('info', state.connected ? `gamepad: ${state.id}` : 'gamepad disconnected');
+      gamepadState = state;
+      updateGamepadStatus();
+      log(
+        'info',
+        state.connected ? `gamepad: ${normalizeGamepadName(state.id)}` : 'gamepad disconnected',
+      );
+      if (!state.connected) {
+        // Mirrors the WebSocket-transport-loss handling below: unconditional
+        // safe state, whether or not the engine was armed, whether or not
+        // the gamepad currently owns the axes. A vanished controller must
+        // never leave the vehicle driving on stale input. The transport
+        // itself is still connected here, so the ordinary sequenced update
+        // (not the urgent emergencyStop bypass) reaches the robot right
+        // away; rhythm.ts's decideSend already skips re-sending an
+        // unchanged disarmed/idle state, so this does not spam the link
+        // when the engine was already safe.
+        engine.safeState('disconnect');
+      }
     },
   });
 
@@ -269,14 +295,20 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     { signal },
   );
 
-  // Touch buttons: active while held, same as keyboard.
+  // Touch buttons: active while held, same as keyboard. touchAxes is shared
+  // across every button (not per-button) so forward+right held together
+  // combine into one axes reading, same as the original summed version did.
+  const touchAxes = { throttle: 0, steering: 0 };
   for (const button of app.querySelectorAll<HTMLButtonElement>('.key')) {
     const axis = button.dataset.axis;
     const gripper = button.dataset.gripper;
     const release = (): void => {
-      if (axis === 'throttle') touchInput.throttle = 0;
-      if (axis === 'steering') touchInput.steering = 0;
-      if (gripper !== undefined) grippers.touch = 'idle';
+      if (axis === 'throttle') touchAxes.throttle = 0;
+      if (axis === 'steering') touchAxes.steering = 0;
+      ownership.setAxes('touch', touchAxes);
+      if (gripper !== undefined) ownership.setGripper('touch', 'idle');
+      // Zeroing this button's own contribution never claims ownership: a
+      // release must not hand control to whatever source is now selected.
       applyAxes();
       applyGripper();
     };
@@ -284,10 +316,13 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
       'pointerdown',
       (event: PointerEvent) => {
         button.setPointerCapture(event.pointerId);
+        ownership.claim('touch');
+        updateGamepadStatus();
         const value = Number(button.dataset.value ?? 0);
-        if (axis === 'throttle') touchInput.throttle = value;
-        if (axis === 'steering') touchInput.steering = value;
-        if (gripper === 'open' || gripper === 'close') grippers.touch = gripper;
+        if (axis === 'throttle') touchAxes.throttle = value;
+        if (axis === 'steering') touchAxes.steering = value;
+        ownership.setAxes('touch', touchAxes);
+        if (gripper === 'open' || gripper === 'close') ownership.setGripper('touch', gripper);
         applyAxes();
         applyGripper();
       },
