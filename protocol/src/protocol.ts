@@ -14,8 +14,14 @@ export const PROTOCOL_VERSION = 1;
 /** Who each socket is inside a room. */
 export type Role = 'controller' | 'device';
 
-/** Default TTL of a driving frame: after that time it is no longer obeyed. */
-export const CONTROL_TTL_MS = 250;
+/**
+ * Default TTL of a driving frame: after that time it is no longer obeyed.
+ *
+ * Must stay well above the sender's heartbeat cadence (`DEFAULT_RHYTHM.heartbeatMs`
+ * in web/src/transport/rhythm.ts): a tight margin makes the watchdog trip on
+ * ordinary Internet/Wi-Fi/Cloudflare jitter, not just on a real link loss.
+ */
+export const CONTROL_TTL_MS = 500;
 
 interface Envelope {
   readonly v: typeof PROTOCOL_VERSION;

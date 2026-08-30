@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ControlState } from '@rovelink/protocol';
-import { normalizeState } from '@rovelink/protocol';
+import { CONTROL_TTL_MS, normalizeState } from '@rovelink/protocol';
 
 import { DEFAULT_RHYTHM, decideSend } from './rhythm.ts';
 
@@ -43,6 +43,8 @@ test('rhythm: disarmed and still, the link does not send driving packets', () =>
   assert.equal(decideSend(stopped, stopped, 10_000), 'skip');
 });
 
-test('rhythm: the heartbeat fits within the vehicle TTL', () => {
-  assert.ok(DEFAULT_RHYTHM.heartbeatMs < 250);
+test('rhythm: the heartbeat leaves enough margin for the vehicle TTL to absorb jitter', () => {
+  // A single missed/delayed heartbeat must not trip the watchdog: require at
+  // least 2 heartbeat periods of slack before the frame would expire.
+  assert.ok(DEFAULT_RHYTHM.heartbeatMs * 2 <= CONTROL_TTL_MS);
 });

@@ -21,8 +21,8 @@
 #include "network.h"
 #include "transport.h"
 
-// Must match TTL_CONTROL_MS from protocol/src/protocol.ts.
-const unsigned long TTL_CONTROL_MS = 250;
+// Must match CONTROL_TTL_MS from protocol/src/protocol.ts.
+const unsigned long TTL_CONTROL_MS = 500;
 
 // --- Driving state (equivalent of ControlState in protocol) ---
 struct ControlState
