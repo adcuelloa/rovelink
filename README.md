@@ -146,10 +146,10 @@ pnpm build          # build all packages
 
 ## Environment Variables
 
-| Variable         | Where     | Default    | Purpose                   |
-| ---------------- | --------- | ---------- | ------------------------- |
-| `VITE_RELAY_URL` | `web/`    | —          | WSS base URL of the relay |
-| `VITE_ROBOT_ID`  | `web/`    | `robot-01` | Robot ID to connect to    |
+| Variable         | Where  | Default    | Purpose                   |
+| ---------------- | ------ | ---------- | ------------------------- |
+| `VITE_RELAY_URL` | `web/` | —          | WSS base URL of the relay |
+| `VITE_ROBOT_ID`  | `web/` | `robot-01` | Robot ID to connect to    |
 
 Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI.
 
