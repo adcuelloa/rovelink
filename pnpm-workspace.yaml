@@ -1,3 +1,5 @@
+saveExact: true
+
 packages:
   - protocol
   - web

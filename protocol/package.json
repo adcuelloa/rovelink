@@ -12,6 +12,6 @@
     "build": "echo 'no build needed; typecheck verifies types'"
   },
   "devDependencies": {
-    "@types/node": "^26.4.0"
+    "@types/node": "26.4.0"
   }
 }

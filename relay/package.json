@@ -14,8 +14,8 @@
     "@rovelink/protocol": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260101.0",
-    "@types/node": "^26.4.0",
-    "wrangler": "^4.127.1"
+    "@cloudflare/workers-types": "4.20260101.0",
+    "@types/node": "26.4.0",
+    "wrangler": "4.127.1"
   }
 }
