@@ -7,6 +7,14 @@ import { parseRoute } from './route.ts';
 
 export interface Env {
   readonly ROOMS: DurableObjectNamespace;
+  /** Shared long-lived credential the ESP32 sends in `device.register`.
+   * Single-robot MVP: one secret for the whole fleet. If multiple robot ids
+   * become real, this must become per-robot (e.g. `DEVICE_SECRET_<ROBOT_ID>`
+   * or a KV/D1-backed credential store) instead of one flat secret. */
+  readonly DEVICE_SECRET: string;
+  /** Shared operator credential sent in `controller.register`. Same
+   * single-robot caveat as DEVICE_SECRET. */
+  readonly CONTROLLER_SECRET: string;
 }
 
 export default {
