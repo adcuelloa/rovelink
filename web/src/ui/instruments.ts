@@ -43,7 +43,7 @@ export const INITIAL_READINGS: Readings = {
   sent: 0,
   received: 0,
   gamepad: 'not detected',
-  transport: 'Mock',
+  transport: 'WebSocket',
   telThrottle: 0,
   telSteering: 0,
 };

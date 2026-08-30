@@ -33,13 +33,9 @@ export const CONTROL_TEMPLATE = `
     </p>
     <p class="status-light" id="chip-robot" data-on="false" role="status">Offline</p>
     <p class="status-light" id="chip-armed" data-on="false" role="status">Safe</p>
-    <label class="label flex items-center gap-2">
-      Transport
-      <select id="transport-selector" class="field min-w-0 max-w-44">
-        <option value="mock">Mock</option>
-        <option value="websocket">WebSocket</option>
-      </select>
-    </label>
+    <p class="label flex items-center gap-2">
+      Transport: <b id="transport-name">WebSocket</b>
+    </p>
   </header>
 
   <section class="module" id="drive-panel" data-armed="false"

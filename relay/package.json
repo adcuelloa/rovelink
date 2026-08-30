@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy",
     "typecheck": "oxlint --type-aware --type-check .",
     "build": "echo 'wrangler bundles at deploy time; typecheck verifies types'",
     "test": "node --test src/*.test.ts"

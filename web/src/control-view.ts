@@ -12,7 +12,6 @@ import type { Gripper } from '@rovelink/protocol';
 import { ControlEngine } from './control/engine.ts';
 import { listenGamepad } from './control/gamepad.ts';
 import { listenKeyboard } from './control/keyboard.ts';
-import { MockTransport } from './transport/mock.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
 import {
@@ -23,8 +22,6 @@ import {
 import { CONTROL_TEMPLATE } from './ui/control-template.ts';
 import { $ } from './ui/dom.ts';
 import { Instruments } from './ui/instruments.ts';
-
-type TransportName = 'mock' | 'websocket';
 
 const MAX_EVENTS = 40;
 
@@ -43,17 +40,9 @@ export function mountControl(app: HTMLElement): () => void {
   const engine = new ControlEngine();
   const logList = $('#log-control', HTMLOListElement);
   const announcements = $('#announcements-control', HTMLElement);
-  const selector = $('#transport-selector', HTMLSelectElement);
   const linkButton = $('#btn-link', HTMLButtonElement);
 
   const relay = getConfiguredRelayUrl();
-  if (relay === undefined) {
-    const option = [...selector.options].find((o) => o.value === 'websocket');
-    if (option !== undefined) {
-      option.disabled = true;
-      option.textContent = 'WebSocket (not configured)';
-    }
-  }
 
   function log(level: AlertLevel, text: string): void {
     const li = document.createElement('li');
@@ -88,8 +77,8 @@ export function mountControl(app: HTMLElement): () => void {
   }
 
   // --- transport ------------------------------------------------------------
-  let transport: RobotTransport = new MockTransport({ robotId });
-  let sender = new ControlSender(transport);
+  let transport: RobotTransport;
+  let sender: ControlSender;
   let linked = false;
 
   function handleTransport(event: TransportEvent): void {
@@ -129,31 +118,34 @@ export function mountControl(app: HTMLElement): () => void {
     }
   }
 
-  let unsubscribeTransport = transport.subscribe(handleTransport);
+  let unsubscribeTransport: () => void;
 
-  function create(name: TransportName): RobotTransport {
-    if (name === 'websocket' && relay !== undefined) {
-      return new WebSocketTransport({ url: relay, robotId });
-    }
-    return new MockTransport({ robotId });
-  }
+  // --- configuration check --------------------------------------------------
+  if (relay === undefined) {
+    // No relay configured: show clear error state, do NOT fallback to mock.
+    instruments.update({ connection: 'disconnected', transport: 'WebSocket' });
+    linkButton.disabled = true;
+    linkButton.textContent = 'No relay configured';
+    log('error', 'VITE_RELAY_URL is not set — cannot connect');
 
-  function useTransport(name: TransportName): void {
-    sender.stop();
-    unsubscribeTransport();
-    transport.disconnect();
-
-    transport = create(name);
+    // Create a no-op transport so the rest of the UI doesn't crash.
+    transport = {
+      name: 'WebSocket',
+      robotId,
+      connect: () => Promise.resolve(),
+      disconnect: () => {},
+      sendControl: () => {},
+      emergencyStop: () => {},
+      subscribe: () => () => {},
+    };
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
-    instruments.update({
-      transport: transport.name,
-      rtt: null,
-      rssi: null,
-      seq: 0,
-      sent: 0,
-      received: 0,
-    });
+  } else {
+    transport = new WebSocketTransport({ url: relay, robotId });
+    sender = new ControlSender(transport);
+    unsubscribeTransport = transport.subscribe(handleTransport);
+
+    instruments.update({ transport: transport.name });
     log('info', `transport: ${transport.name}`);
     sender.start(() => engine.state);
     void transport.connect();
@@ -236,12 +228,6 @@ export function mountControl(app: HTMLElement): () => void {
     { signal },
   );
 
-  selector.addEventListener(
-    'change',
-    () => useTransport(selector.value === 'websocket' ? 'websocket' : 'mock'),
-    { signal },
-  );
-
   // Touch buttons: active while held, same as keyboard.
   for (const button of app.querySelectorAll<HTMLButtonElement>('.key')) {
     const axis = button.dataset.axis;
@@ -269,10 +255,6 @@ export function mountControl(app: HTMLElement): () => void {
     button.addEventListener('pointerup', release, { signal });
     button.addEventListener('pointercancel', release, { signal });
   }
-
-  log('info', `transport: ${transport.name}`);
-  sender.start(() => engine.state);
-  void transport.connect();
 
   return () => {
     abort.abort();
