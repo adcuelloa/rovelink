@@ -9,8 +9,14 @@
 import type { ControlState, RemoteMessage } from '@rovelink/protocol';
 import { CLOSE_CODE, JSON_CODEC, PROTOCOL_VERSION, createControlFrame } from '@rovelink/protocol';
 
+import type { VideoTicketOutcome, VideoTicketSource } from '../video/ticket-source.ts';
 import type { Counters, RobotTransport, TransportListener } from './types.ts';
 import { INITIAL_COUNTS, Emitter } from './types.ts';
+
+/** How long `requestVideoTicket()` waits for `controller.videoTicket`
+ * before giving up (Problem 7D §4). Well above a normal round trip, well
+ * below anything a human would notice as a hang. */
+const VIDEO_TICKET_TIMEOUT_MS = 8000;
 
 export interface WebSocketOptions {
   /** Relay base URL, e.g. `wss://relay.example.workers.dev`. */
@@ -31,7 +37,30 @@ export const getConfiguredRelayUrl = (): string | undefined => {
 
 export const getConfiguredRobotId = (): string => import.meta.env.VITE_ROBOT_ID ?? 'robot-01';
 
-export class WebSocketTransport implements RobotTransport {
+/** `undefined` when no video relay is configured: the video panel shows
+ * that instead of failing (Problem 7D §15). Deliberately a SEPARATE
+ * config value from `getConfiguredRelayUrl` — control and video are
+ * always different Worker deployments, never the same URL. */
+export const getConfiguredVideoRelayUrl = (): string | undefined => {
+  const url = import.meta.env.VITE_VIDEO_RELAY_URL;
+  return typeof url === 'string' && url.length > 0 ? url : undefined;
+};
+
+/** Awaiting `controller.videoTicket` for a request already sent. Only one
+ * of these exists at a time (Problem 7D §4): a second `requestVideoTicket()`
+ * call resolves this one as `superseded` before starting its own. */
+interface PendingTicketRequest {
+  readonly resolve: (outcome: VideoTicketOutcome) => void;
+  readonly timeout: ReturnType<typeof setTimeout>;
+  /** The `#ws` this request was sent on — if that socket is replaced or
+   * torn down before a response arrives, this request is resolved
+   * `disconnected` rather than left to time out or match a reply from a
+   * DIFFERENT connection/session (Problem 7D §4's "stale response from an
+   * old control connection/session"). */
+  readonly socket: WebSocket;
+}
+
+export class WebSocketTransport implements RobotTransport, VideoTicketSource {
   readonly name = 'WebSocket';
   readonly robotId: string;
 
@@ -50,6 +79,7 @@ export class WebSocketTransport implements RobotTransport {
   #heartbeat: ReturnType<typeof setInterval> | null = null;
   #retry: ReturnType<typeof setTimeout> | null = null;
   #wantConnection = false;
+  #pendingTicketRequest: PendingTicketRequest | null = null;
 
   constructor(options: WebSocketOptions) {
     this.#url = options.url.replace(/\/+$/, '');
@@ -86,6 +116,7 @@ export class WebSocketTransport implements RobotTransport {
     this.#stopHeartbeat();
     if (this.#retry !== null) clearTimeout(this.#retry);
     this.#retry = null;
+    if (this.#ws !== null) this.#failPendingTicketRequestFor(this.#ws);
     this.#ws?.close();
     this.#ws = null;
     this.#emitter.emit({ kind: 'robot', online: false });
@@ -99,6 +130,49 @@ export class WebSocketTransport implements RobotTransport {
 
   emergencyStop(): void {
     this.#send({ v: PROTOCOL_VERSION, type: 'emergency-stop', sentAt: Date.now() });
+  }
+
+  /**
+   * The only bridge VideoTransport has into control (Problem 7D §1/§4):
+   * asks THIS already-authenticated connection for a short-lived video
+   * viewer ticket. Never sends `CONTROLLER_SECRET` anywhere near
+   * VideoTransport — only the resulting ticket crosses that boundary.
+   *
+   * At most one outstanding request at a time: the wire protocol has no
+   * correlation id (see protocol.ts's `VideoTicketRequest`), so a second
+   * call while one is pending resolves the first as `superseded` rather
+   * than inventing unreliable matching logic.
+   */
+  requestVideoTicket(): Promise<VideoTicketOutcome> {
+    const ws = this.#ws;
+    if (ws === null || ws.readyState !== WebSocket.OPEN) {
+      return Promise.resolve({ ok: false, reason: 'disconnected' });
+    }
+    this.#supersedePendingTicketRequest();
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (this.#pendingTicketRequest?.resolve === resolve) this.#pendingTicketRequest = null;
+        resolve({ ok: false, reason: 'timeout' });
+      }, VIDEO_TICKET_TIMEOUT_MS);
+      this.#pendingTicketRequest = { resolve, timeout, socket: ws };
+      this.#send({ v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    });
+  }
+
+  #supersedePendingTicketRequest(): void {
+    const pending = this.#pendingTicketRequest;
+    if (pending === null) return;
+    clearTimeout(pending.timeout);
+    this.#pendingTicketRequest = null;
+    pending.resolve({ ok: false, reason: 'superseded' });
+  }
+
+  #failPendingTicketRequestFor(ws: WebSocket): void {
+    const pending = this.#pendingTicketRequest;
+    if (pending === null || pending.socket !== ws) return;
+    clearTimeout(pending.timeout);
+    this.#pendingTicketRequest = null;
+    pending.resolve({ ok: false, reason: 'disconnected' });
   }
 
   #open(ready: () => void): void {
@@ -129,6 +203,12 @@ export class WebSocketTransport implements RobotTransport {
 
     ws.addEventListener('close', (event: CloseEvent) => {
       this.#stopHeartbeat();
+      // A ticket request outstanding on THIS socket can never be answered
+      // now — resolved 'disconnected' rather than left to its own timeout,
+      // and never confused with a request sent on a socket that replaced
+      // it (Problem 7D §4's "stale response from an old control
+      // connection/session").
+      this.#failPendingTicketRequestFor(ws);
       if (this.#ws !== ws) return;
       this.#ws = null;
       this.#emitter.emit({ kind: 'robot', online: false });
@@ -170,6 +250,14 @@ export class WebSocketTransport implements RobotTransport {
         // controller for any other reason, so no further check is needed
         // here beyond having arrived on this authenticated connection.
         this.#emitter.emit({ kind: 'session-established' });
+        return;
+      case 'controller.videoTicket':
+        if (this.#pendingTicketRequest !== null) {
+          clearTimeout(this.#pendingTicketRequest.timeout);
+          const { resolve } = this.#pendingTicketRequest;
+          this.#pendingTicketRequest = null;
+          resolve({ ok: true, ticket: message.ticket, expiresAt: message.expiresAt });
+        }
         return;
       default:
         return;
