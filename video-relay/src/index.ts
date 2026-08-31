@@ -11,6 +11,17 @@ import { parseVideoRoute } from './route.ts';
 
 export interface Env {
   readonly VIDEO_ROOMS: DurableObjectNamespace;
+  /** Shared long-lived credential the camera publisher sends in
+   * `publisher.register` (Problem 7C). Single-robot MVP: one secret for
+   * the whole fleet — see the flat-secret limitation noted in room.ts and
+   * the Problem 7C brief §12. Future multi-robot deployments would need a
+   * robot-scoped credential store instead of one flat secret. */
+  readonly VIDEO_PUBLISHER_SECRET: string;
+  /** Shared ONLY between this Worker and the control relay
+   * (`@rovelink/relay`) — signs/verifies short-lived viewer tickets (see
+   * `@rovelink/protocol`'s video-ticket.ts). Never sent to, or knowable
+   * by, the browser. */
+  readonly VIDEO_TICKET_SECRET: string;
 }
 
 export default {

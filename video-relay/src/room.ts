@@ -9,6 +9,29 @@
  * only thing they have in common is the same hibernation-based WebSocket
  * pattern, because it is the right tool for both.
  *
+ * AUTHENTICATION (Problem 7C) — a socket is "pending" from the moment it
+ * connects until it completes registration; a pending socket owns no role
+ * slot, is invisible to presence/occupancy, and cannot publish or view
+ * anything:
+ *
+ *   - PUBLISHER: sends `publisher.register { robotId, token }`. `token` is
+ *     verified against `VIDEO_PUBLISHER_SECRET` (constant-time, via
+ *     `@rovelink/protocol`'s `verifyCredential` — the same mechanism the
+ *     control relay uses for `device.register`). A validly authenticated
+ *     publisher MAY replace an already-live one (authenticated takeover,
+ *     mirroring Problem 3's device-replacement model) — an invalid one can
+ *     never evict the incumbent.
+ *   - VIEWER: sends `viewer.register { robotId, ticket }`. `ticket` is a
+ *     short-lived signed token minted by the CONTROL relay for an already
+ *     authenticated controller (`@rovelink/protocol`'s
+ *     `verifyVideoTicket`) — this Worker never sees `CONTROLLER_SECRET`
+ *     and never mints tickets itself, only verifies them with
+ *     `VIDEO_TICKET_SECRET`, a secret shared only between the two relays.
+ *
+ * A pending socket that never completes registration is evicted by the
+ * same alarm-driven sweep that handles ack-timeout (below), bounded by
+ * REGISTRATION_TIMEOUT_MS.
+ *
  * BACKPRESSURE (Problem 7B.1 hardening) — the Cloudflare Workers
  * `WebSocket` type (checked against @cloudflare/workers-types 5.20260829.1)
  * exposes `send()` returning `void` and no `bufferedAmount`, no
@@ -31,29 +54,21 @@
  *     which releases its credit and — if a newer frame already exists —
  *     immediately hands over the NEWEST one, never anything queued in
  *     between (see #handleViewerAck).
- *   - A viewer that never acks is not left as a zombie: an alarm-driven
- *     sweep (ACK_TIMEOUT_MS) evicts it, the same durable-across-hibernation
- *     mechanism the control relay uses for its own staleness sweep (see
- *     `@rovelink/relay`'s room.ts STALE_MS/alarm()).
+ *   - A viewer that never acks is not left as a zombie: the same
+ *     alarm-driven sweep evicts it (ACK_TIMEOUT_MS), durable across DO
+ *     hibernation (see `@rovelink/relay`'s room.ts STALE_MS/alarm(), the
+ *     same pattern).
  *
- * The runtime's own auto-close-on-full-buffer behavior still exists as a
- * transport-level backstop, but it is no longer load-bearing for
- * correctness: the ack/credit protocol is what actually guarantees "at
- * most one frame in flight per viewer," independent of whatever the
- * WebSocket implementation does underneath.
- *
- * STORAGE — frames are ephemeral by design (Problem 7B brief §13): nothing
- * in this file ever calls `this.#state.storage.put/sql.exec`. `#latestFrame`
- * and every viewer's `inFlight`/`framesSkipped` live only in
- * `serializeAttachment`-backed socket attachments and a plain class
- * property — bounded (one frame per room, one in-flight id per viewer), and
- * `#latestFrame` does NOT survive hibernation (a newly-woken room simply
- * has no cached frame until the next one arrives, which is fine: stale
- * imagery is worth less than a moment's wait for a fresh one). Attachments
- * DO survive hibernation, which is why `inFlight`/`framesSkipped` live
- * there rather than in a class property — an ack arriving after the room
- * hibernated and woke back up must still be checked against the same
- * credit state it was issued against.
+ * STORAGE — frames are ephemeral by design (Problem 7B brief §13), and
+ * secrets/tickets are NEVER persisted (Problem 7C brief §17): nothing in
+ * this file ever calls `this.#state.storage.put/sql.exec`. `#latestFrame`
+ * and every socket's `inFlight`/`framesSkipped`/`pendingSince` live only in
+ * `serializeAttachment`-backed socket attachments (which DO survive
+ * hibernation — a registered/pending socket's status is never lost across
+ * a sleep cycle) and a plain class property for `#latestFrame` (which does
+ * NOT survive hibernation — a newly-woken room simply has no cached frame
+ * until the next one arrives, which is fine: stale imagery is worth less
+ * than a moment's wait for a fresh one).
  */
 
 import type { VideoFrameHeader, VideoRole } from '@rovelink/protocol';
@@ -64,8 +79,11 @@ import {
   MAX_JPEG_BYTES,
   VIDEO_CLOSE_CODE,
   VIDEO_PROTOCOL_VERSION,
+  verifyCredential,
+  verifyVideoTicket,
 } from '@rovelink/protocol';
 
+import type { Env } from './index.ts';
 import { parseVideoRoute } from './route.ts';
 
 /** How long a viewer's `inFlight` frame may go unacknowledged before the
@@ -77,9 +95,14 @@ import { parseVideoRoute } from './route.ts';
  * stopped acknowledging, not one that is merely a bit slow. */
 const ACK_TIMEOUT_MS = 5000;
 
-/** How often the alarm re-checks for a timed-out in-flight frame while any
- * socket is attached. Mirrors the control relay's SWEEP_INTERVAL_MS
- * pattern (`@rovelink/relay`'s room.ts). */
+/** How long a pending (not-yet-registered) publisher or viewer socket may
+ * sit before the room gives up on it (Problem 7C brief §14). Matches the
+ * control relay's own REGISTER_TIMEOUT_MS. */
+const REGISTRATION_TIMEOUT_MS = 5000;
+
+/** How often the alarm re-checks for a timed-out in-flight frame or an
+ * expired registration window, while any socket is attached. Mirrors the
+ * control relay's SWEEP_INTERVAL_MS pattern (`@rovelink/relay`'s room.ts). */
 const SWEEP_INTERVAL_MS = 2000;
 
 interface InFlight {
@@ -93,11 +116,18 @@ interface InFlight {
 interface Attachment {
   readonly robotId: string;
   readonly role: VideoRole;
-  /** Publisher: true once accepted as the room's authoritative publisher
-   * (see #handlePublisherConnect). Viewer: always true immediately — 7B has
-   * no viewer auth/capacity limit to gate on. */
+  /** True once this socket has completed `publisher.register` /
+   * `viewer.register` — before that it is "pending": invisible to
+   * presence/occupancy, and cannot publish or view anything (Problem 7C
+   * brief §10/§14/§15). */
   readonly registered: boolean;
-  /** Publisher only, set once at accept time; never client-supplied. */
+  /** `Date.now()` when this socket connected. Only meaningful while
+   * `registered` is false — what REGISTRATION_TIMEOUT_MS is measured
+   * against. Irrelevant once registered (an established socket has its own
+   * liveness story: `inFlight`/ACK_TIMEOUT_MS for viewers, its own
+   * close/error events for publishers). */
+  readonly pendingSince: number;
+  /** Publisher only, set once at registration; never client-supplied. */
   readonly streamSessionId?: string;
   /** Publisher only: a `frame` header already received, awaiting its
    * binary payload (the very next message on this socket). Cleared the
@@ -134,6 +164,7 @@ function readAttachment(ws: WebSocket): Attachment | null {
     robotId: possible.robotId,
     role: possible.role,
     registered: possible.registered === true,
+    pendingSince: typeof possible.pendingSince === 'number' ? possible.pendingSince : 0,
     streamSessionId:
       typeof possible.streamSessionId === 'string' ? possible.streamSessionId : undefined,
     pendingHeader: possible.pendingHeader,
@@ -149,13 +180,15 @@ interface CachedFrame {
 
 export class VideoRoom implements DurableObject {
   readonly #state: DurableObjectState;
+  readonly #env: Env;
 
   /** The single most recent complete frame for this room, or none. Class
    * property, not storage: see the module doc comment above. */
   #latestFrame: CachedFrame | null = null;
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, env: Env) {
     this.#state = state;
+    this.#env = env;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -166,17 +199,19 @@ export class VideoRoom implements DurableObject {
     const client = pair[0];
     const server = pair[1];
     this.#state.acceptWebSocket(server, [route.role]);
+    // Every socket starts pending: neither role sends/receives anything
+    // real until it registers (see webSocketMessage's dispatch below).
+    server.serializeAttachment({
+      robotId: route.robotId,
+      role: route.role,
+      registered: false,
+      pendingSince: Date.now(),
+    } satisfies Attachment);
 
-    if (route.role === 'publisher') {
-      this.#handlePublisherConnect(server, route.robotId);
-    } else {
-      this.#handleViewerConnect(server, route.robotId);
-    }
-
-    // The alarm is how an unacknowledged in-flight frame gets noticed even
-    // if the viewer never sends anything else again — see alarm() below.
-    // setAlarm() is a no-op if one is already scheduled at or before this
-    // time, so this stays cheap.
+    // The alarm is how a stalled registration or an unacknowledged
+    // in-flight frame gets noticed even if the socket never sends anything
+    // else again — see alarm() below. setAlarm() is a no-op if one is
+    // already scheduled at or before this time, so this stays cheap.
     await this.#ensureSweepScheduled();
 
     return new Response(null, { status: 101, webSocket: client });
@@ -184,20 +219,46 @@ export class VideoRoom implements DurableObject {
 
   async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
     const attachment = readAttachment(ws);
-    if (attachment === null || !attachment.registered) return;
+    if (attachment === null) return;
 
-    if (attachment.role === 'viewer') {
-      // A viewer never sends binary frame data in 7B: only a text
-      // `viewer.ack` is meaningful from this side.
-      if (typeof data === 'string') this.#handleViewerAck(ws, attachment, data);
+    if (typeof data !== 'string') {
+      // Binary: only ever meaningful from an already-registered publisher
+      // (Problem 7C brief §10 — a pending publisher's frames are ignored).
+      if (attachment.registered && attachment.role === 'publisher') {
+        this.#handleFrameBinary(ws, attachment, data);
+      }
       return;
     }
 
-    if (typeof data === 'string') {
-      this.#handleFrameHeader(ws, attachment, data);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
       return;
     }
-    this.#handleFrameBinary(ws, attachment, data);
+    if (!isVideoMessage(parsed)) return;
+
+    if (parsed.type === 'publisher.register' && attachment.role === 'publisher') {
+      await this.#handlePublisherRegister(ws, attachment, parsed);
+      return;
+    }
+    if (parsed.type === 'viewer.register' && attachment.role === 'viewer') {
+      await this.#handleViewerRegister(ws, attachment, parsed);
+      return;
+    }
+
+    // Everything else requires an already-registered socket: a pending
+    // publisher's frame headers and a pending viewer's acks are both
+    // ignored (Problem 7C brief §10/§15).
+    if (!attachment.registered) return;
+
+    if (parsed.type === 'frame' && attachment.role === 'publisher') {
+      this.#handleFrameHeader(ws, attachment, parsed);
+      return;
+    }
+    if (parsed.type === 'viewer.ack' && attachment.role === 'viewer') {
+      this.#handleViewerAck(ws, attachment, parsed);
+    }
   }
 
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
@@ -223,66 +284,92 @@ export class VideoRoom implements DurableObject {
   }
 
   /**
-   * Periodic liveness sweep for the ack/credit protocol (Problem 7B.1 §7):
-   * a viewer whose `inFlight` frame has gone unacknowledged past
-   * ACK_TIMEOUT_MS is evicted outright — never buffered for, never given a
-   * second frame while the first is still outstanding. Mirrors the control
-   * relay's alarm-based sweep (`@rovelink/relay`'s room.ts): using a durable
-   * alarm rather than an in-memory timer is what makes this survive
-   * hibernation between checks.
+   * Periodic liveness sweep covering TWO independent timeouts, both
+   * durable across DO hibernation via the same alarm:
+   *
+   *   - a PENDING socket (publisher or viewer) that never completed
+   *     registration within REGISTRATION_TIMEOUT_MS (Problem 7C §14)
+   *   - a REGISTERED viewer whose `inFlight` frame has gone unacknowledged
+   *     past ACK_TIMEOUT_MS (Problem 7B.1 §7)
+   *
+   * Neither case is buffered for or retried: both are evicted outright.
    */
   async alarm(): Promise<void> {
     let anySockets = false;
-    for (const ws of this.#getSockets('viewer')) {
-      anySockets = true;
-      const attachment = readAttachment(ws);
-      if (attachment?.inFlight === undefined) continue;
-      if (Date.now() - attachment.inFlight.sentAt < ACK_TIMEOUT_MS) continue;
-      console.log(`[video-room] ack-timeout-evict robot=${attachment.robotId}`);
-      this.#closeQuietly(ws, VIDEO_CLOSE_CODE.ACK_TIMEOUT, 'ack-timeout');
+    const now = Date.now();
+
+    for (const role of ['publisher', 'viewer'] as const) {
+      for (const ws of this.#getSockets(role)) {
+        anySockets = true;
+        const attachment = readAttachment(ws);
+        if (attachment === null) continue;
+
+        if (!attachment.registered) {
+          if (now - attachment.pendingSince < REGISTRATION_TIMEOUT_MS) continue;
+          console.log(
+            `[video-room] registration-timeout-evict role=${role} robot=${attachment.robotId}`,
+          );
+          this.#closeQuietly(ws, VIDEO_CLOSE_CODE.REGISTRATION_TIMEOUT, 'registration-timeout');
+          continue;
+        }
+
+        if (role !== 'viewer' || attachment.inFlight === undefined) continue;
+        if (now - attachment.inFlight.sentAt < ACK_TIMEOUT_MS) continue;
+        console.log(`[video-room] ack-timeout-evict robot=${attachment.robotId}`);
+        this.#closeQuietly(ws, VIDEO_CLOSE_CODE.ACK_TIMEOUT, 'ack-timeout');
+      }
     }
-    for (const ws of this.#getSockets('publisher')) {
-      // A connected publisher alone should keep the sweep alive too, so a
-      // viewer that joins later is still covered without a gap.
-      void ws;
-      anySockets = true;
-    }
-    if (anySockets) await this.#state.storage.setAlarm(Date.now() + SWEEP_INTERVAL_MS);
+
+    if (anySockets) await this.#state.storage.setAlarm(now + SWEEP_INTERVAL_MS);
   }
 
   /**
-   * Occupancy is decided synchronously, right here, against sockets already
-   * registered for this robotId — not deferred to a later "register"
-   * message, unlike the control relay's device/controller flow. 7B has no
-   * credential to wait for (see Problem 7B brief §19), so there is nothing
-   * to gain by delaying the decision, and conservative-reject is the
-   * explicitly requested behavior (§9): a second live publisher never
-   * displaces the first.
+   * Validates the publisher's credential, then applies Problem 7C's
+   * authenticated-takeover policy (§13): a validly authenticated new
+   * publisher MAY replace an already-live one — the old one is demoted and
+   * closed with PUBLISHER_REPLACED, the new one gets a fresh
+   * streamSessionId, and viewers are told the stream changed. An INVALID
+   * publisher can never evict the incumbent: only the new (invalid) socket
+   * is closed, with the generic AUTH_FAILED code — the same
+   * never-reveal-which-check-failed policy as the control relay's own
+   * device/controller auth failures.
+   *
+   * Preferred over 7B's unconditional reject because the realistic failure
+   * mode for a single physical camera is a REBOOT — the old socket often
+   * doesn't close cleanly (power loss, watchdog reset), and requiring a
+   * human to notice and manually clear a stale publisher slot would block
+   * recovery for no security benefit: only a credential holder can ever
+   * trigger a takeover in the first place.
    */
-  #handlePublisherConnect(ws: WebSocket, robotId: string): void {
-    const others = this.#getSockets('publisher').filter((other) => other !== ws);
-    const live = others.filter((other) => readAttachment(other)?.registered === true);
-
-    if (live.length > 0) {
-      ws.serializeAttachment({
-        robotId,
-        role: 'publisher',
-        registered: false,
-      } satisfies Attachment);
+  async #handlePublisherRegister(
+    ws: WebSocket,
+    attachment: Attachment,
+    message: { readonly robotId: string; readonly token: string },
+  ): Promise<void> {
+    if (message.robotId !== attachment.robotId) {
+      this.#closeQuietly(ws, VIDEO_CLOSE_CODE.AUTH_FAILED, 'auth-failed');
+      return;
+    }
+    const ok = await verifyCredential(message.token, this.#env.VIDEO_PUBLISHER_SECRET);
+    if (!ok) {
+      console.log(`[video-room] auth-failed role=publisher robot=${attachment.robotId}`);
       this.#send(ws, {
         v: VIDEO_PROTOCOL_VERSION,
         type: 'publisher.rejected',
-        robotId,
-        reason: 'publisher-occupied',
+        robotId: attachment.robotId,
+        reason: 'auth-failed',
       });
-      this.#closeQuietly(ws, VIDEO_CLOSE_CODE.PUBLISHER_OCCUPIED, 'publisher-occupied');
+      this.#closeQuietly(ws, VIDEO_CLOSE_CODE.AUTH_FAILED, 'auth-failed');
       return;
     }
 
+    const others = this.#getSockets('publisher').filter((other) => other !== ws);
+    const live = others.filter((other) => readAttachment(other)?.registered === true);
+    for (const other of live) this.#demote(other);
+
     const streamSessionId = crypto.randomUUID();
     ws.serializeAttachment({
-      robotId,
-      role: 'publisher',
+      ...attachment,
       registered: true,
       streamSessionId,
     } satisfies Attachment);
@@ -293,20 +380,59 @@ export class VideoRoom implements DurableObject {
     this.#send(ws, {
       v: VIDEO_PROTOCOL_VERSION,
       type: 'publisher.accepted',
-      robotId,
+      robotId: attachment.robotId,
       streamSessionId,
     });
-    this.#broadcastStreamState(robotId);
+    this.#broadcastStreamState(attachment.robotId);
+
+    for (const other of live) {
+      this.#closeQuietly(
+        other,
+        VIDEO_CLOSE_CODE.PUBLISHER_REPLACED,
+        'replaced-by-authenticated-publisher',
+      );
+    }
   }
 
-  /** A viewer is always accepted in 7B (no auth, no capacity limit yet —
-   * see brief §10/§19): it is told the current state immediately, plus
-   * whatever frame is cached (consuming its first unit of credit, exactly
-   * like any other frame delivery — see #trySendFrameToViewer), so it never
-   * has to guess or wait a full frame interval for its first image. */
-  #handleViewerConnect(ws: WebSocket, robotId: string): void {
-    ws.serializeAttachment({ robotId, role: 'viewer', registered: true } satisfies Attachment);
-    this.#send(ws, this.#currentStreamState(robotId));
+  /**
+   * Verifies the viewer's ticket (minted only by the control relay — see
+   * @rovelink/protocol's video-ticket.ts) against `VIDEO_TICKET_SECRET`.
+   * Only on success is the socket promoted to registered, and only THEN is
+   * it told the current stream state and handed the cached latest frame if
+   * one exists (consuming its first unit of credit, exactly like any other
+   * frame delivery — see #trySendFrameToViewer) — an unauthenticated
+   * viewer is never shown so much as a single cached frame (Problem 7C
+   * brief §15).
+   */
+  async #handleViewerRegister(
+    ws: WebSocket,
+    attachment: Attachment,
+    message: { readonly robotId: string; readonly ticket: string },
+  ): Promise<void> {
+    if (message.robotId !== attachment.robotId) {
+      this.#closeQuietly(ws, VIDEO_CLOSE_CODE.AUTH_FAILED, 'auth-failed');
+      return;
+    }
+    const result = await verifyVideoTicket(
+      message.ticket,
+      this.#env.VIDEO_TICKET_SECRET,
+      { robotId: attachment.robotId, role: 'viewer' },
+      Date.now(),
+    );
+    if (!result.ok) {
+      console.log(
+        `[video-room] auth-failed role=viewer robot=${attachment.robotId} reason=${result.reason}`,
+      );
+      const code =
+        result.reason === 'expired'
+          ? VIDEO_CLOSE_CODE.TICKET_EXPIRED
+          : VIDEO_CLOSE_CODE.AUTH_FAILED;
+      this.#closeQuietly(ws, code, result.reason === 'expired' ? 'ticket-expired' : 'auth-failed');
+      return;
+    }
+
+    ws.serializeAttachment({ ...attachment, registered: true } satisfies Attachment);
+    this.#send(ws, this.#currentStreamState(attachment.robotId));
     if (this.#latestFrame !== null) {
       this.#trySendFrameToViewer(ws, this.#latestFrame.header, this.#latestFrame.jpeg);
     }
@@ -317,28 +443,20 @@ export class VideoRoom implements DurableObject {
    * before the binary payload it describes (see protocol/src/video.ts).
    * Anything that doesn't parse as a valid `frame` header for THIS
    * publisher's own session is safely ignored — chosen over closing the
-   * connection, per §16's "rejected or safely ignored", because 7B is
-   * explicitly unauthenticated transport prototyping, not a hardened
-   * boundary: a stray malformed message should not cost the publisher its
-   * whole connection. An oversized declared length is the one case that
-   * DOES close the connection, because forwarding it was never going to
-   * succeed anyway and there is no reason to let the publisher keep trying.
+   * connection, per §16's "rejected or safely ignored": a stray malformed
+   * message should not cost an already-authenticated publisher its whole
+   * connection. An oversized declared length is the one case that DOES
+   * close the connection, because forwarding it was never going to succeed
+   * anyway and there is no reason to let the publisher keep trying.
    */
-  #handleFrameHeader(ws: WebSocket, attachment: Attachment, data: string): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(data);
-    } catch {
-      return;
-    }
-    if (!isVideoMessage(parsed) || parsed.type !== 'frame') return;
-    if (parsed.streamSessionId !== attachment.streamSessionId) return;
+  #handleFrameHeader(ws: WebSocket, attachment: Attachment, message: VideoFrameHeader): void {
+    if (message.streamSessionId !== attachment.streamSessionId) return;
 
-    if (parsed.byteLength > MAX_JPEG_BYTES) {
+    if (message.byteLength > MAX_JPEG_BYTES) {
       this.#closeQuietly(ws, VIDEO_CLOSE_CODE.OVERSIZED_FRAME, 'oversized-frame');
       return;
     }
-    ws.serializeAttachment({ ...attachment, pendingHeader: parsed } satisfies Attachment);
+    ws.serializeAttachment({ ...attachment, pendingHeader: message } satisfies Attachment);
   }
 
   /**
@@ -371,17 +489,13 @@ export class VideoRoom implements DurableObject {
    * immediately — this is the "40 in flight, viewer acks 40, latest is
    * already 44, viewer gets 44 (not 41/42/43)" behavior from §3.
    */
-  #handleViewerAck(ws: WebSocket, attachment: Attachment, data: string): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(data);
-    } catch {
-      return;
-    }
-    if (!isVideoMessage(parsed) || parsed.type !== 'viewer.ack') return;
-
+  #handleViewerAck(
+    ws: WebSocket,
+    attachment: Attachment,
+    message: { readonly streamSessionId: string; readonly seq: number },
+  ): void {
     const inFlight = attachment.inFlight;
-    if (inFlight === undefined || !isMatchingAck(parsed, inFlight)) return;
+    if (inFlight === undefined || !isMatchingAck(message, inFlight)) return;
 
     ws.serializeAttachment({ ...attachment, inFlight: undefined } satisfies Attachment);
 
@@ -437,7 +551,10 @@ export class VideoRoom implements DurableObject {
    * §14, expected/congestion behavior, not an error) is incremented
    * instead. This is the one place that enforces "at most one frame in
    * flight per viewer" at the application level, independent of whatever
-   * the WebSocket transport underneath is doing with `ws.send()`.
+   * the WebSocket transport underneath is doing with `ws.send()`. Not
+   * reachable for an unregistered viewer: every call site either already
+   * checked `registered` or is #handleViewerRegister itself, right after
+   * promoting the socket.
    */
   #trySendFrameToViewer(ws: WebSocket, header: VideoFrameHeader, jpeg: ArrayBuffer): void {
     const attachment = readAttachment(ws);
@@ -490,6 +607,17 @@ export class VideoRoom implements DurableObject {
     } catch {
       // Already closed/closing: nothing to do.
     }
+  }
+
+  /** Strips authority from a publisher socket without closing it: used to
+   * make an authenticated takeover atomic (demote before close) so the old
+   * socket stops being forwarded to or counted in presence the instant the
+   * new one is promoted, regardless of when its close actually completes —
+   * same pattern as the control relay's own #demote. */
+  #demote(ws: WebSocket): void {
+    const attachment = readAttachment(ws);
+    if (attachment === null) return;
+    ws.serializeAttachment({ ...attachment, registered: false } satisfies Attachment);
   }
 
   async #ensureSweepScheduled(): Promise<void> {

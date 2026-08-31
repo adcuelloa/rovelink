@@ -14,6 +14,12 @@
     "bindings": [{ "name": "VIDEO_ROOMS", "class_name": "VideoRoom" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VideoRoom"] }],
-  // 7B is deliberately unauthenticated (Problem 7C adds publisher/viewer
-  // auth) — no secrets are declared here yet.
+  // Set with `wrangler secret put VIDEO_PUBLISHER_SECRET` /
+  // `VIDEO_TICKET_SECRET` — never here. VIDEO_TICKET_SECRET must be set to
+  // the exact same value as the control relay's (`@rovelink/relay`)
+  // VIDEO_TICKET_SECRET: it is the shared secret the two Workers use to
+  // agree a ticket the control relay minted is genuine. Declaring the
+  // names makes `wrangler deploy` fail loudly if either is missing,
+  // instead of silently deploying a relay that fails every auth check.
+  "secrets": { "required": ["VIDEO_PUBLISHER_SECRET", "VIDEO_TICKET_SECRET"] },
 }
