@@ -4,7 +4,7 @@ import test from 'node:test';
 import { ControlEngine } from './engine.ts';
 import { listenGamepad, NO_GAMEPAD } from './gamepad.ts';
 import type { GamepadHandlers, GamepadLike, GamepadState, GamepadTarget } from './gamepad.ts';
-import { STANDARD_MAPPING } from './mapping.ts';
+import { STANDARD_BUTTONS } from './controls.ts';
 
 /**
  * A minimal fake for `GamepadTarget` — the narrow interface `listenGamepad`
@@ -21,7 +21,8 @@ interface FakeGamepadEvent {
   readonly gamepad: FakePad;
 }
 
-const { forward: R2, reverse: L2 } = STANDARD_MAPPING.throttleTriggers;
+const R2 = STANDARD_BUTTONS.R2;
+const L2 = STANDARD_BUTTONS.L2;
 
 /**
  * Digital buttons in `pressed` get value=1; R2/L2 depth can additionally be
@@ -166,7 +167,7 @@ test('gamepad: a button already held at the instant of connection does not fire 
   const { handlers, actionCalls } = record();
   const stop = listenGamepad(target, handlers);
 
-  target.plug(makePad({ buttons: makeButtons([STANDARD_MAPPING.buttons.arm]) }));
+  target.plug(makePad({ buttons: makeButtons([STANDARD_BUTTONS.Options]) }));
   target.tick();
 
   assert.equal(actionCalls.length, 0);
@@ -258,7 +259,7 @@ test('gamepad: pressing Arm after connecting fires the arm action once', () => {
   target.plug(pad);
   target.tick(); // baseline: released
 
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
   target.tick(); // holding it must not repeat the action
 
@@ -275,7 +276,7 @@ test('gamepad: disconnect zeroes local axes and gripper immediately', () => {
   target.plug(pad);
   target.tick(); // baseline: centered, released
 
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.openGripper], { r2: 1 });
+  pad.buttons = makeButtons([STANDARD_BUTTONS.L1], { r2: 1 });
   target.tick(); // real movement + gripper press after connecting
   assert.deepEqual(axesCalls.at(-1), [1, 0]);
   assert.equal(gripperCalls.at(-1), 'open');
@@ -343,11 +344,11 @@ test('gamepad+engine: disconnect while armed forces armed=false and zero axes', 
   target.plug(pad);
   target.tick();
 
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
   assert.equal(engine.state.armed, true);
 
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm], { r2: 1 });
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options], { r2: 1 });
   target.tick();
   assert.equal(engine.state.throttle, 1);
 
@@ -384,7 +385,7 @@ test('gamepad+engine: reconnect after disconnect stays disarmed', () => {
   const pad = makePad();
   target.plug(pad);
   target.tick();
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
   assert.equal(engine.state.armed, true);
 
@@ -414,7 +415,7 @@ test('gamepad+engine: the only path from a gamepad reading to engine state is th
   const pad = makePad();
   target.plug(pad);
   target.tick();
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
   pad.axes = [1, 0];
   target.tick();
@@ -434,15 +435,16 @@ test('gamepad+engine: Emergency Stop fires even when the gamepad is not the acti
   const pad = makePad();
   target.plug(pad);
   target.tick();
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
   assert.equal(engine.state.armed, true);
 
   // Simulate another source (e.g. keyboard) currently driving — irrelevant
   // to this test's engine, since Emergency Stop bypasses ownership entirely
   // and acts on the shared ControlEngine directly.
-  const [chordA, chordB] = STANDARD_MAPPING.stopChord;
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm, chordA, chordB]);
+  const chordA = STANDARD_BUTTONS.L3;
+  const chordB = STANDARD_BUTTONS.R3;
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options, chordA, chordB]);
   target.tick();
 
   assert.equal(engine.state.armed, false);
@@ -461,14 +463,15 @@ test('gamepad+engine: holding the E-stop chord across frames stops the vehicle e
   };
   const stop = wireToEngine(target, engine);
 
-  const [chordA, chordB] = STANDARD_MAPPING.stopChord;
+  const chordA = STANDARD_BUTTONS.L3;
+  const chordB = STANDARD_BUTTONS.R3;
   const pad = makePad();
   target.plug(pad);
   target.tick();
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options]);
   target.tick();
 
-  pad.buttons = makeButtons([STANDARD_MAPPING.buttons.arm, chordA, chordB]);
+  pad.buttons = makeButtons([STANDARD_BUTTONS.Options, chordA, chordB]);
   target.tick();
   target.tick();
   target.tick();
