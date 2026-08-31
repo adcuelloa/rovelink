@@ -16,13 +16,27 @@ interface Shape {
   readonly svg: string;
 }
 
-const RECT = (control: PhysicalControl, label: string, x: number, y: number, w: number, h: number, r = 6): Shape => ({
+const RECT = (
+  control: PhysicalControl,
+  label: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r = 6,
+): Shape => ({
   control,
   label,
   svg: `<rect data-control="${control}" id="ctrl-${control}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"></rect>`,
 });
 
-const CIRCLE = (control: PhysicalControl, label: string, cx: number, cy: number, radius: number): Shape => ({
+const CIRCLE = (
+  control: PhysicalControl,
+  label: string,
+  cx: number,
+  cy: number,
+  radius: number,
+): Shape => ({
   control,
   label,
   svg: `<circle data-control="${control}" id="ctrl-${control}" cx="${cx}" cy="${cy}" r="${radius}"></circle>`,

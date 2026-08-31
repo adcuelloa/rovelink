@@ -10,15 +10,20 @@
  * fresh-listener-on-close sequence that surrounds this.
  */
 
-import type { ButtonControl, PhysicalControl } from '../control/controls.ts';
-import { ALL_CONTROLS, isAxisControl, readSemantic, ZERO_SEMANTIC_VALUES } from '../control/controls.ts';
 import { detectActivation } from '../control/capture.ts';
+import type { ButtonControl, PhysicalControl } from '../control/controls.ts';
+import {
+  ALL_CONTROLS,
+  isAxisControl,
+  readSemantic,
+  ZERO_SEMANTIC_VALUES,
+} from '../control/controls.ts';
 import type { GamepadReading } from '../control/mapping.ts';
 import { DEFAULT_DEADZONE, normalizeGamepadName } from '../control/mapping.ts';
+import { loadProfile, resetToRacing, resetToStick, saveProfile } from '../control/profile-store.ts';
+import { describeIssue, validateProfile } from '../control/profile-validate.ts';
 import type { ControllerProfile, ProfileId } from '../control/profile.ts';
 import { evaluateProfile, RACING_PROFILE, STICK_PROFILE, toCustom } from '../control/profile.ts';
-import { describeIssue, validateProfile } from '../control/profile-validate.ts';
-import { loadProfile, resetToRacing, resetToStick, saveProfile } from '../control/profile-store.ts';
 import { STICK_AXIS_PAIRS } from './controller-diagram.ts';
 import { CONTROLLER_SETTINGS_TEMPLATE } from './controller-settings-template.ts';
 import { $ } from './dom.ts';
@@ -46,7 +51,10 @@ const BINDING_ACTIONS = [
   'emergencyStop',
 ] as const;
 
-function bindingLabel(profile: ControllerProfile, action: (typeof BINDING_ACTIONS)[number]): string {
+function bindingLabel(
+  profile: ControllerProfile,
+  action: (typeof BINDING_ACTIONS)[number],
+): string {
   switch (action) {
     case 'throttle':
       return profile.throttle.mode === 'axis'
@@ -89,7 +97,8 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
   const liveSteering = $('#live-steering', HTMLElement);
 
   let activeProfile: ControllerProfile = loadProfile();
-  let customDraft: ControllerProfile = activeProfile.id === 'custom' ? activeProfile : toCustom(RACING_PROFILE);
+  let customDraft: ControllerProfile =
+    activeProfile.id === 'custom' ? activeProfile : toCustom(RACING_PROFILE);
   let rebindStep: RebindStep | null = null;
   let previousValues = ZERO_SEMANTIC_VALUES;
   let gamepadId: string | null = null;
@@ -197,7 +206,12 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
         if (isAxisControl(control)) {
           applyAndClose({
             ...base,
-            throttle: { mode: 'axis', axis: control, invert: false, deadzone: DEFAULT_DEADZONE.stick },
+            throttle: {
+              mode: 'axis',
+              axis: control,
+              invert: false,
+              deadzone: DEFAULT_DEADZONE.stick,
+            },
           });
         } else {
           startCapture(
@@ -209,12 +223,18 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
       }
       case 'throttle-reverse': {
         if (isAxisControl(control) || control === step.forward) return;
-        applyAndClose({ ...base, throttle: { mode: 'split', forward: step.forward, reverse: control } });
+        applyAndClose({
+          ...base,
+          throttle: { mode: 'split', forward: step.forward, reverse: control },
+        });
         return;
       }
       case 'estop-a': {
         if (isAxisControl(control)) return;
-        startCapture({ kind: 'estop-b', first: control }, `First: ${control}. Now press the second control…`);
+        startCapture(
+          { kind: 'estop-b', first: control },
+          `First: ${control}. Now press the second control…`,
+        );
         return;
       }
       case 'estop-b': {
@@ -228,7 +248,9 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
   function applyAndClose(draft: ControllerProfile): void {
     rebindStep = null;
     const applied = tryApplyProfile(draft);
-    setCaptureMessage(applied ? null : 'That control conflicts with an existing binding — not applied.');
+    setCaptureMessage(
+      applied ? null : 'That control conflicts with an existing binding — not applied.',
+    );
   }
 
   // --- wiring: profile tabs --------------------------------------------------

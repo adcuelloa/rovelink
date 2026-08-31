@@ -14,8 +14,8 @@ import type { GamepadState } from './control/gamepad.ts';
 import { listenKeyboard } from './control/keyboard.ts';
 import { normalizeGamepadName } from './control/mapping.ts';
 import { InputOwnership } from './control/ownership.ts';
-import type { ControllerProfile } from './control/profile.ts';
 import { loadProfile } from './control/profile-store.ts';
+import type { ControllerProfile } from './control/profile.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
 import { getConfiguredRelayUrl, getConfiguredRobotId } from './transport/websocket.ts';
@@ -344,9 +344,13 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   const abort = new AbortController();
   const { signal } = abort;
 
-  $('#btn-controller-settings', HTMLButtonElement).addEventListener('click', openControllerSettings, {
-    signal,
-  });
+  $('#btn-controller-settings', HTMLButtonElement).addEventListener(
+    'click',
+    openControllerSettings,
+    {
+      signal,
+    },
+  );
 
   $('#btn-arm', HTMLButtonElement).addEventListener('click', () => engine.arm(true), { signal });
   $('#btn-disarm', HTMLButtonElement).addEventListener('click', () => engine.arm(false), {

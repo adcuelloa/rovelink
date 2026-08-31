@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ControllerProfile } from './profile.ts';
-import { RACING_PROFILE, STICK_PROFILE, toCustom } from './profile.ts';
 import {
   loadProfile,
   parseStoredProfile,
@@ -11,6 +9,8 @@ import {
   saveProfile,
   STORAGE_KEY,
 } from './profile-store.ts';
+import type { ControllerProfile } from './profile.ts';
+import { RACING_PROFILE, STICK_PROFILE, toCustom } from './profile.ts';
 
 /** A minimal in-memory Storage stand-in — no jsdom/localStorage needed. */
 class FakeStorage {
@@ -58,7 +58,10 @@ test('profile-store: an unsupported schema version falls back to Racing', () => 
 
 test('profile-store: a structurally valid but unsafe profile (e.g. E-stop conflict) falls back to Racing', () => {
   const storage = new FakeStorage();
-  const unsafe: ControllerProfile = { ...toCustom(RACING_PROFILE), emergencyStop: { a: 'Options', b: 'R3' } };
+  const unsafe: ControllerProfile = {
+    ...toCustom(RACING_PROFILE),
+    emergencyStop: { a: 'Options', b: 'R3' },
+  };
   storage.raw = JSON.stringify({ version: 1, profile: unsafe });
   assert.deepEqual(loadProfile(storage), RACING_PROFILE);
 });

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { detectActivation } from './capture.ts';
 import { ZERO_SEMANTIC_VALUES } from './controls.ts';
 import type { SemanticValues } from './controls.ts';
-import { detectActivation } from './capture.ts';
 
 function values(overrides: Partial<SemanticValues>): SemanticValues {
   return { ...ZERO_SEMANTIC_VALUES, ...overrides };

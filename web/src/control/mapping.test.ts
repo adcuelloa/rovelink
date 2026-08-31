@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BUTTONS_RELEASED, applyDeadzone, gripperFromButtons, newPresses, normalizeGamepadName } from './mapping.ts';
+import {
+  BUTTONS_RELEASED,
+  applyDeadzone,
+  gripperFromButtons,
+  newPresses,
+  normalizeGamepadName,
+} from './mapping.ts';
 
 test('gamepad: deadzone rescales instead of jumping', () => {
   assert.equal(applyDeadzone(0.05, 0.12), 0);

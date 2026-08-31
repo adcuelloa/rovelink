@@ -1,11 +1,15 @@
 import './style.css';
-import { runHandshake } from './auth/handshake.ts';
 import { clearControllerKey, getControllerKey, setControllerKey } from './auth/controller-key.ts';
+import { runHandshake } from './auth/handshake.ts';
 import type { ControlSession } from './control-view.ts';
 import { mountControl } from './control-view.ts';
 import { mountLogin } from './login-view.ts';
 import { ControlSender } from './transport/sender.ts';
-import { getConfiguredRelayUrl, getConfiguredRobotId, WebSocketTransport } from './transport/websocket.ts';
+import {
+  getConfiguredRelayUrl,
+  getConfiguredRobotId,
+  WebSocketTransport,
+} from './transport/websocket.ts';
 import { $ } from './ui/dom.ts';
 
 /**

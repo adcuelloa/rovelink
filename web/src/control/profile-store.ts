@@ -12,9 +12,14 @@
  */
 
 import { isAxisControl, isButtonControl } from './controls.ts';
-import type { ControllerProfile, EmergencyStopChord, SteeringMapping, ThrottleMapping } from './profile.ts';
-import { RACING_PROFILE, STICK_PROFILE } from './profile.ts';
 import { isProfileValid } from './profile-validate.ts';
+import type {
+  ControllerProfile,
+  EmergencyStopChord,
+  SteeringMapping,
+  ThrottleMapping,
+} from './profile.ts';
+import { RACING_PROFILE, STICK_PROFILE } from './profile.ts';
 
 export const STORAGE_KEY = 'rovelink.controllerProfile.v1';
 
@@ -83,7 +88,18 @@ export function parseStoredProfile(value: unknown): ControllerProfile | null {
   const emergencyStop = parseEmergencyStopChord(value.emergencyStop);
   if (emergencyStop === null) return null;
 
-  return { version: 1, id, name, throttle, steering, gripperOpen, gripperClose, arm, disarm, emergencyStop };
+  return {
+    version: 1,
+    id,
+    name,
+    throttle,
+    steering,
+    gripperOpen,
+    gripperClose,
+    arm,
+    disarm,
+    emergencyStop,
+  };
 }
 
 /** Loads the stored profile, or Racing if there is none, it is malformed,

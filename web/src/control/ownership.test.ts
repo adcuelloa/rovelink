@@ -136,4 +136,3 @@ test('ownership: nothing has ever claimed ownership yields idle output', () => {
   assert.deepEqual(ownership.axes, { throttle: 0, steering: 0 });
   assert.equal(ownership.gripper, 'idle');
 });
-

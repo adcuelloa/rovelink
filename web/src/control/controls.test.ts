@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  ALL_CONTROLS,
+  isAxisControl,
+  isButtonControl,
+  readSemantic,
+  ZERO_SEMANTIC_VALUES,
+} from './controls.ts';
 import type { GamepadReading } from './mapping.ts';
-import { ALL_CONTROLS, isAxisControl, isButtonControl, readSemantic, ZERO_SEMANTIC_VALUES } from './controls.ts';
 
 function reading(overrides: Partial<GamepadReading> = {}): GamepadReading {
   return {

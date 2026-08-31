@@ -23,7 +23,12 @@ import type { ButtonAction, GamepadInput } from './mapping.ts';
 import { applyDeadzone, BUTTONS_RELEASED, DEFAULT_DEADZONE } from './mapping.ts';
 
 export type ThrottleMapping =
-  | { readonly mode: 'axis'; readonly axis: AxisControl; readonly invert: boolean; readonly deadzone: number }
+  | {
+      readonly mode: 'axis';
+      readonly axis: AxisControl;
+      readonly invert: boolean;
+      readonly deadzone: number;
+    }
   | { readonly mode: 'split'; readonly forward: ButtonControl; readonly reverse: ButtonControl };
 
 export interface SteeringMapping {
@@ -91,7 +96,8 @@ export function toCustom(profile: ControllerProfile, name = 'Custom'): Controlle
   return { ...profile, id: 'custom', name };
 }
 
-const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
 
 function evaluateThrottle(values: SemanticValues, mapping: ThrottleMapping): number {
   if (mapping.mode === 'axis') {

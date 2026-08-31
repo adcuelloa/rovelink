@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { STANDARD_BUTTONS } from './controls.ts';
 import { ControlEngine } from './engine.ts';
 import { listenGamepad, NO_GAMEPAD } from './gamepad.ts';
 import type { GamepadHandlers, GamepadLike, GamepadState, GamepadTarget } from './gamepad.ts';
-import { STANDARD_BUTTONS } from './controls.ts';
 
 /**
  * A minimal fake for `GamepadTarget` — the narrow interface `listenGamepad`

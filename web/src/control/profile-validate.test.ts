@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { isProfileValid, validateProfile } from './profile-validate.ts';
 import type { ControllerProfile } from './profile.ts';
 import { RACING_PROFILE, STICK_PROFILE } from './profile.ts';
-import { isProfileValid, validateProfile } from './profile-validate.ts';
 
 test('validate: the built-in Racing and Stick presets are valid', () => {
   assert.deepEqual(validateProfile(RACING_PROFILE), []);
@@ -13,7 +13,11 @@ test('validate: the built-in Racing and Stick presets are valid', () => {
 });
 
 test('validate: Square bound to both gripper actions is a duplicate-action conflict', () => {
-  const profile: ControllerProfile = { ...RACING_PROFILE, gripperOpen: 'Square', gripperClose: 'Square' };
+  const profile: ControllerProfile = {
+    ...RACING_PROFILE,
+    gripperOpen: 'Square',
+    gripperClose: 'Square',
+  };
   const issues = validateProfile(profile);
   assert.equal(issues.length, 1);
   assert.equal(issues[0]?.kind, 'duplicate-digital-action');
@@ -40,11 +44,17 @@ test('validate: an Emergency Stop chord with the same control twice is invalid',
 });
 
 test('validate: an Emergency Stop control cannot also be Arm', () => {
-  const profile: ControllerProfile = { ...RACING_PROFILE, emergencyStop: { a: 'Options', b: 'R3' } };
+  const profile: ControllerProfile = {
+    ...RACING_PROFILE,
+    emergencyStop: { a: 'Options', b: 'R3' },
+  };
   const issues = validateProfile(profile);
   assert.equal(
     issues.some(
-      (i) => i.kind === 'estop-safety-conflict' && i.control === 'Options' && i.conflictingAction === 'arm',
+      (i) =>
+        i.kind === 'estop-safety-conflict' &&
+        i.control === 'Options' &&
+        i.conflictingAction === 'arm',
     ),
     true,
   );

@@ -19,7 +19,9 @@ const AXIS_CONTROL_SET = new Set<string>(AXIS_CONTROLS);
 export const CAPTURE_AXIS_THRESHOLD = 0.6;
 
 function isActive(control: PhysicalControl, value: number): boolean {
-  return AXIS_CONTROL_SET.has(control) ? Math.abs(value) >= CAPTURE_AXIS_THRESHOLD : isPressed(value);
+  return AXIS_CONTROL_SET.has(control)
+    ? Math.abs(value) >= CAPTURE_AXIS_THRESHOLD
+    : isPressed(value);
 }
 
 /**
@@ -33,7 +35,8 @@ export function detectActivation(
   current: SemanticValues,
 ): PhysicalControl | null {
   for (const control of ALL_CONTROLS) {
-    if (!isActive(control, previous[control]) && isActive(control, current[control])) return control;
+    if (!isActive(control, previous[control]) && isActive(control, current[control]))
+      return control;
   }
   return null;
 }
