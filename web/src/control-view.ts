@@ -18,11 +18,17 @@ import { loadProfile } from './control/profile-store.ts';
 import type { ControllerProfile } from './control/profile.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
-import { getConfiguredRelayUrl, getConfiguredRobotId } from './transport/websocket.ts';
+import {
+  getConfiguredRelayUrl,
+  getConfiguredRobotId,
+  getConfiguredVideoRelayUrl,
+  WebSocketTransport,
+} from './transport/websocket.ts';
 import { CONTROL_TEMPLATE } from './ui/control-template.ts';
 import { mountControllerSettings } from './ui/controller-settings.ts';
 import { $ } from './ui/dom.ts';
 import { Instruments } from './ui/instruments.ts';
+import { mountVideoPanel } from './ui/video-panel.ts';
 
 const MAX_EVENTS = 40;
 
@@ -68,6 +74,19 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   const linkButton = $('#btn-link', HTMLButtonElement);
 
   const relay = getConfiguredRelayUrl();
+
+  // Video (Problem 7D §1): a ticket source only ever exists when this is a
+  // real, already-authenticated WebSocketTransport session — the no-op
+  // fallback transport below implements no such thing, and video simply
+  // stays unavailable rather than ever being handed a fake credential
+  // path. Never gated on `relay` alone: an unauthenticated/misconfigured
+  // control session must never let video start either (§3).
+  const videoPanel = mountVideoPanel(
+    options.session && options.session.transport instanceof WebSocketTransport
+      ? options.session.transport
+      : null,
+    { videoRelayUrl: getConfiguredVideoRelayUrl(), robotId },
+  );
 
   function log(level: AlertLevel, text: string): void {
     const li = document.createElement('li');
@@ -118,6 +137,11 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
         if (event.state === 'disconnected') {
           engine.safeState();
           sender.reset();
+          // Control loss must close video immediately — a security
+          // property, not cosmetic (Problem 7D §8): video must never stay
+          // live, or auto-reconnect, once this connection is no longer
+          // authenticated.
+          videoPanel.onControlLost();
         }
         return;
       case 'robot':
@@ -146,6 +170,7 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
       case 'auth-error':
         log('error', event.text);
         clearControllerKey();
+        videoPanel.onControlLost();
         options.onNeedsLogin(event.text);
         return;
       case 'session-established':
@@ -159,6 +184,10 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
         engine.safeState();
         sender.establishSessionBaseline();
         log('info', 'control session established — disarmed');
+        // Video is only ever allowed to start in direct response to this
+        // same authoritative event (Problem 7D §3) — never merely because
+        // a socket opened.
+        videoPanel.onControlAuthenticated();
         return;
     }
   }
@@ -424,5 +453,6 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     unsubscribeTransport();
     transport.disconnect();
     instruments.destroy();
+    videoPanel.destroy();
   };
 }

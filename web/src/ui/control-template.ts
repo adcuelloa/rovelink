@@ -41,6 +41,27 @@ export const CONTROL_TEMPLATE = `
     </button>
   </header>
 
+  <section class="module full-width" id="video-panel" aria-labelledby="video-title">
+    <div class="module__header">
+      <h2 id="video-title" class="label">Camera</h2>
+      <button type="button" class="label hover:text-ice" id="btn-video-toggle" aria-pressed="true">
+        Video: On
+      </button>
+    </div>
+    <div class="p-3">
+      <div class="video-frame" id="video-frame" data-state="disconnected">
+        <canvas id="video-canvas" width="640" height="480"></canvas>
+        <p class="video-status" id="video-status">Video off</p>
+      </div>
+    </div>
+    <dl class="bus border-groove border-t">
+      ${DATA_POINT('video-fps', 'FPS', '0')}
+      ${DATA_POINT('video-bitrate', 'Bitrate', '—')}
+      ${DATA_POINT('video-dropped', 'Dropped', '0')}
+      ${DATA_POINT('video-age', 'Frame age', '—')}
+    </dl>
+  </section>
+
   <section class="module" id="drive-panel" data-armed="false"
            aria-labelledby="chassis-title">
     <div class="module__header">

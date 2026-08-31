@@ -487,6 +487,40 @@ body {
   .settings-reset {
     @apply flex flex-wrap gap-2;
   }
+
+  /* --- camera panel (Problem 7D) --- */
+
+  .video-frame {
+    @apply border-groove relative overflow-hidden rounded;
+    aspect-ratio: 4 / 3;
+    background: #000;
+  }
+
+  .video-frame canvas {
+    @apply block h-full w-full;
+    object-fit: contain;
+  }
+
+  .video-status {
+    @apply text-ice-2 absolute inset-0 flex items-center justify-center text-center text-[0.7rem] uppercase;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    background: rgb(0 0 0 / 0.4);
+    pointer-events: none;
+    transition: opacity 150ms ease-out;
+  }
+
+  /* Live: the status overlay hides so the image shows unobstructed. */
+  .video-frame[data-state='live'] .video-status {
+    opacity: 0;
+  }
+
+  /* A frame is still shown while reconnecting/waiting, but visibly not
+   * current — never let a stale frame pretend the camera is still live. */
+  .video-frame[data-state='waiting-for-publisher'] canvas,
+  .video-frame[data-state='reconnecting'] canvas {
+    filter: brightness(0.45) saturate(0.5);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
