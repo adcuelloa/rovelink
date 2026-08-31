@@ -39,11 +39,17 @@ RoveLink includes several safety mechanisms by design:
 - **Latest-state-wins**: old commands are never replayed
 - **TLS with CA root validation**: the ESP32 validates the relay's certificate
   against known CA roots (ISRG X1, GTS R1, GTS R4)
+- **Shared-secret authentication**: the `token` field in `device.register`
+  and `controller.register` is verified against `DEVICE_SECRET` /
+  `CONTROLLER_SECRET` (constant-time comparison); an invalid or missing
+  token closes the connection
+- **Video relay authorization**: publishers authenticate with a shared
+  secret; viewers present a short-lived signed ticket, minted by the
+  control relay for an already-authenticated controller and verified by the
+  video relay via a secret shared only between the two Workers
 
 ## Known Limitations
 
-- No authentication yet (the `token` field in `device.register` and
-  `controller.register` is reserved but not enforced)
 - No rate limiting on the relay
 - JSON wire format (no binary protocol yet)
 

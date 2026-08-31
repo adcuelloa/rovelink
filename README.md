@@ -41,6 +41,8 @@ Gamepad / Keyboard / Touch
 ## Features
 
 - WebSocket control with JSON protocol (`v1`)
+- Shared-secret authentication for devices and controllers, ticket-based
+  authorization for video viewers
 - TLS with CA root validation (ISRG X1, GTS R1, GTS R4)
 - ESP32 firmware: WiFi STA + DHCP, WSS client, reconnection with backoff
 - Gamepad API with standard mapping
@@ -54,6 +56,8 @@ Gamepad / Keyboard / Touch
 - Cloudflare Durable Objects for relay rooms
 - Telemetry: RSSI, ackSeq, throttle/steering echo
 - Reconnection on link loss (WiFi and WSS)
+- Live video streaming via a dedicated video relay (separate Worker/DO from
+  the control relay)
 
 ## Repository Structure
 
@@ -61,7 +65,8 @@ Gamepad / Keyboard / Touch
 rovelink/
 ├── protocol/             @rovelink/protocol — shared types, codec, differential mix
 ├── web/                  @rovelink/web — Vite + TypeScript + Tailwind control dashboard
-├── relay/                @rovelink/relay — Cloudflare Worker + Durable Object
+├── relay/                @rovelink/relay — Cloudflare Worker + Durable Object (control)
+├── video-relay/          @rovelink/video-relay — Cloudflare Worker + Durable Object (video)
 ├── firmware/             ESP32 sketch (WiFi + WSS + control logic)
 ├── docs/                 Architecture, protocol, and safety documentation
 ├── README.md
@@ -146,12 +151,14 @@ pnpm build          # build all packages
 
 ## Environment Variables
 
-| Variable         | Where  | Default    | Purpose                   |
-| ---------------- | ------ | ---------- | ------------------------- |
-| `VITE_RELAY_URL` | `web/` | —          | WSS base URL of the relay |
-| `VITE_ROBOT_ID`  | `web/` | `robot-01` | Robot ID to connect to    |
+| Variable               | Where  | Default    | Purpose                                    |
+| ---------------------- | ------ | ---------- | ------------------------------------------ |
+| `VITE_RELAY_URL`       | `web/` | —          | WSS base URL of the control relay          |
+| `VITE_VIDEO_RELAY_URL` | `web/` | —          | WSS base URL of the video relay (optional) |
+| `VITE_ROBOT_ID`        | `web/` | `robot-01` | Robot ID to connect to                     |
 
-Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI.
+Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI. Without
+`VITE_VIDEO_RELAY_URL` the video panel is disabled rather than failing.
 
 ## Current Status
 
@@ -169,7 +176,6 @@ Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI.
 - DualSense-specific button profile
 - Real differential-drive hardware testing
 - Wi-Fi provisioning (no manual SSID entry)
-- Device pairing and authentication
 - Binary control protocol (replacing JSON)
 - Multi-robot management
 

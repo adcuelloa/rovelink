@@ -35,7 +35,7 @@ Both the browser and the firmware independently handle disconnection:
 
 - **Browser**: resets to safe state, disables motor output
 - **Firmware**: monitors both WiFi and WSS connectivity; either dropping
-  triggers safe state via `vigilarRed()` and `vigilarEnlaceWss()`
+  triggers safe state via `watchNetwork()` and `watchWssLink()`
 
 ## Latest State Wins
 
@@ -54,7 +54,6 @@ control logic without risk of unexpected motor movement.
 
 ## Limitations
 
-- No authentication yet (anyone who knows the robot ID can connect)
 - No rate limiting on the relay
 - Software safety is not a replacement for hardware emergency stops
 

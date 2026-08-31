@@ -5,7 +5,7 @@
 // Connectivity layer: WiFi STA mode + DHCP + Internet verification only.
 // No WebSocket, TLS, MQTT, or provisioning yet—those are for later phases.
 //
-//   Control logic (remote_control_car.ino)
+//   Control logic (rovelink_device.ino)
 //         ↓ asks                         ↓ never calls WiFi.* directly
 //   Network (this header)
 //         └── WiFi (Arduino ESP32) + Internet probe

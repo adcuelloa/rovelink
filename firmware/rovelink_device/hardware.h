@@ -4,7 +4,7 @@
 
 // Hardware abstraction layer (RobotHardware).
 //
-//   Control logic (remote_control_car.ino)
+//   Control logic (rovelink_device.ino)
 //         ↓
 //   RobotHardware  (this header)
 //         ├── SimulatedHardware  (hardware_sim.cpp)

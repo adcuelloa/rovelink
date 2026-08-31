@@ -8,7 +8,7 @@
 //    ↓
 //   decode/validate (here)
 //    ↓
-//   control logic (remote_control_car.ino, via callbacks below)
+//   control logic (rovelink_device.ino, via callbacks below)
 //    ↓
 //   RobotHardware
 //

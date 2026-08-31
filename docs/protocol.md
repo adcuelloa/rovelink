@@ -7,6 +7,11 @@ Current protocol version: **1** (`v: 1`)
 The version field is included in every message. The relay and firmware reject
 messages with unrecognized versions.
 
+This document covers the control protocol only (browser ↔ relay ↔ ESP32).
+The video relay (publisher/viewer streaming and ticket-based auth) is a
+separate wire protocol — see `protocol/src/video.ts` and
+`protocol/src/video-ticket.ts`.
+
 ## Messages
 
 All messages are JSON objects with `v` and `type` fields.
@@ -21,9 +26,12 @@ Sent by the ESP32 after connecting to the relay.
   "type": "device.register",
   "robotId": "robot-01",
   "firmware": "0.1.0",
-  "token": "optional-device-token"
+  "token": "device-secret"
 }
 ```
+
+`token` is verified (constant-time comparison) against the relay's
+`DEVICE_SECRET`; an invalid or missing token closes the connection.
 
 ### controller.register
 
@@ -34,9 +42,12 @@ Sent by the browser after connecting to the relay.
   "v": 1,
   "type": "controller.register",
   "robotId": "robot-01",
-  "token": "optional-operator-token"
+  "token": "controller-secret"
 }
 ```
+
+`token` is verified against the relay's `CONTROLLER_SECRET` the same way as
+`device.register`.
 
 ### control
 

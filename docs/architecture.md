@@ -26,6 +26,17 @@ open outbound connections to the relay. The relay routes messages between them.
 - Publishes `room` presence messages to both ends
 - Stateless per connection: no database, no queues
 
+### Video Relay (`video-relay/`)
+
+- Separate Cloudflare Worker + Durable Object (`VideoRoom`) from the control
+  relay — an isolated deployment so video load or a crashed video room can
+  never affect robot control
+- Forwards JPEG frames from an authenticated publisher to authenticated
+  viewers
+- Publishers authenticate with a shared secret; viewers present a
+  short-lived signed ticket minted by the control relay (see
+  [protocol.md](protocol.md))
+
 ### Protocol (`protocol/`)
 
 - Shared types, codec, and differential wheel mix

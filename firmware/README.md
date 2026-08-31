@@ -11,7 +11,7 @@ transport.cpp: decodes JSON, validates version and shape
  ↓
 callbacks (transportOnControl / transportOnEmergencyStop)
  ↓
-carro.ino: applyControlFrame() / enterSafeState()
+rovelink_device.ino: applyControlFrame() / enterSafeState()
  ↓
 RobotHardware
 ```
@@ -54,10 +54,10 @@ arduino-cli lib install "ESP32Servo@3.2.1"
 
 ```bash
 # ESP32-S3 (hardware simulation)
-arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/carro
+arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/rovelink_device
 
 # Real robot (set HARDWARE_SIMULATION 0 in config.h first)
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/carro
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/rovelink_device
 ```
 
 ## WiFi Credentials
@@ -65,8 +65,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32 firmware/carro
 `wifi_secrets.h` is not versioned. Create it from the template:
 
 ```bash
-cp firmware/carro/wifi_secrets.example.h \
-   firmware/carro/wifi_secrets.h
+cp firmware/rovelink_device/wifi_secrets.example.h \
+   firmware/rovelink_device/wifi_secrets.h
 ```
 
 Edit with your SSID and password. Without this file, compilation fails with

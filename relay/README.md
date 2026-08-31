@@ -9,7 +9,7 @@ Cloudflare Worker + Durable Object `RobotRoom`. See the root
 pnpm dev:relay      # http://localhost:8787, ws://localhost:8787/robot/<id>/<role>
 ```
 
-Used by `firmware/carro/relay_config.h` in
+Used by `firmware/rovelink_device/relay_config.h` in
 `RELAY_PROFILE_LOCAL` (no TLS) and `web/.env.example`
 (`VITE_RELAY_URL=ws://localhost:8787`).
 
@@ -37,7 +37,7 @@ also visible in `npx wrangler deployments list` or the dashboard.)
 
 ## Configure the other endpoints
 
-**Firmware** (`firmware/carro/relay_config.h`):
+**Firmware** (`firmware/rovelink_device/relay_config.h`):
 
 ```cpp
 #define RELAY_PROFILE RELAY_PROFILE_CLOUDFLARE
