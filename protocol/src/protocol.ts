@@ -136,6 +136,29 @@ export interface RoomState extends Envelope {
   readonly controllerOnline: boolean;
 }
 
+/**
+ * Controller -> relay: requests a short-lived video viewer ticket (Problem
+ * 7C). Deliberately carries no credential and no robotId — authority comes
+ * entirely from this socket's own registration state (an already
+ * registered, authenticated controller — see relay/src/room.ts), and a
+ * ticket can only ever be minted for the robot THIS room already
+ * authenticated the controller against, never a client-declared one.
+ */
+export interface VideoTicketRequest extends Envelope {
+  readonly type: 'controller.videoTicket.request';
+}
+
+/** Relay -> controller: the minted ticket, sent only to the requesting
+ * socket. `ticket` is opaque to the browser — it hands it to the video
+ * relay's `viewer.register` unchanged (see @rovelink/protocol's
+ * video-ticket.ts). */
+export interface VideoTicketResponse extends Envelope {
+  readonly type: 'controller.videoTicket';
+  readonly robotId: string;
+  readonly ticket: string;
+  readonly expiresAt: number;
+}
+
 export type RemoteMessage =
   | DeviceRegistration
   | ControllerRegistration
@@ -145,7 +168,9 @@ export type RemoteMessage =
   | Ping
   | Pong
   | EmergencyStop
-  | RoomState;
+  | RoomState
+  | VideoTicketRequest
+  | VideoTicketResponse;
 
 export type MessageType = RemoteMessage['type'];
 
@@ -218,6 +243,10 @@ export function isRemoteMessage(value: unknown): value is RemoteMessage {
         typeof m.deviceOnline === 'boolean' &&
         typeof m.controllerOnline === 'boolean'
       );
+    case 'controller.videoTicket.request':
+      return true;
+    case 'controller.videoTicket':
+      return typeof m.robotId === 'string' && typeof m.ticket === 'string' && isNumber(m.expiresAt);
     default:
       return false;
   }

@@ -6,6 +6,7 @@ import {
   isMatchingAck,
   isVideoMessage,
   MAX_JPEG_BYTES,
+  VIDEO_CLOSE_CODE,
   VIDEO_PROTOCOL_VERSION,
 } from './video.ts';
 
@@ -87,6 +88,35 @@ test('video message: viewer.ack valid/invalid shapes', () => {
     isVideoMessage({ v, type: 'viewer.ack', streamSessionId: 's1', seq: 'forty' }),
     false,
   );
+});
+
+test('video message: publisher.register valid/invalid shapes', () => {
+  assert.equal(
+    isVideoMessage({ v, type: 'publisher.register', robotId: 'robot-01', token: 'secret' }),
+    true,
+  );
+  assert.equal(isVideoMessage({ v, type: 'publisher.register', robotId: 'robot-01' }), false);
+  assert.equal(isVideoMessage({ v, type: 'publisher.register', token: 'secret' }), false);
+});
+
+test('video message: viewer.register valid/invalid shapes', () => {
+  assert.equal(
+    isVideoMessage({ v, type: 'viewer.register', robotId: 'robot-01', ticket: 'a.b' }),
+    true,
+  );
+  assert.equal(isVideoMessage({ v, type: 'viewer.register', robotId: 'robot-01' }), false);
+  assert.equal(isVideoMessage({ v, type: 'viewer.register', ticket: 'a.b' }), false);
+});
+
+test('VIDEO_CLOSE_CODE: distinct 4100-range values, one per name', () => {
+  const codes = Object.values(VIDEO_CLOSE_CODE);
+  assert.equal(new Set(codes).size, codes.length);
+  for (const code of codes) assert.ok(code >= 4100 && code < 4200);
+  // Auth-related codes introduced in Problem 7C.
+  assert.ok(Number.isInteger(VIDEO_CLOSE_CODE.AUTH_FAILED));
+  assert.ok(Number.isInteger(VIDEO_CLOSE_CODE.TICKET_EXPIRED));
+  assert.ok(Number.isInteger(VIDEO_CLOSE_CODE.REGISTRATION_TIMEOUT));
+  assert.ok(Number.isInteger(VIDEO_CLOSE_CODE.PUBLISHER_REPLACED));
 });
 
 test('video message: rejects non-envelopes and unknown types', () => {

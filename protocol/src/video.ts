@@ -27,14 +27,40 @@ export const VIDEO_PROTOCOL_VERSION = 1;
  * protocols that must stay independently readable. */
 export type VideoRole = 'publisher' | 'viewer';
 
-/** Private application WebSocket close codes for the video relay, in a
+/**
+ * Private application WebSocket close codes for the video relay, in a
  * distinct numeric range (4100s) from control's CLOSE_CODE (4000s, see
  * protocol.ts) purely so a mixed log/trace never has to guess which relay
- * emitted a given code. */
+ * emitted a given code.
+ *
+ * NUMERIC STABILITY: the three codes that already existed before Problem
+ * 7C (PROTOCOL_VIOLATION, OVERSIZED_FRAME, ACK_TIMEOUT) keep their
+ * original Problem 7B/7B.1 numbers — their meaning never changed, so there
+ * is no reason to renumber them. New 7C concepts get freshly allocated
+ * numbers (4105+) rather than reusing anything. 4101 was
+ * `PUBLISHER_OCCUPIED` in 7B (a second publisher was unconditionally
+ * rejected, no auth existing yet); 7C replaced that behavior entirely with
+ * authenticated takeover (see PUBLISHER_REPLACED below and room.ts
+ * #handlePublisherRegister), so the code is RETIRED, not reused — the room
+ * never emits 4101 anymore, and 4101 is deliberately left unassigned
+ * rather than given a new, different meaning that old logs/clients could
+ * misread.
+ *
+ * Deliberately never reused between different failure kinds, and
+ * deliberately generic where a more specific reason would leak useful
+ * information to an attacker (Problem 7C brief §16): AUTH_FAILED covers
+ * every publisher-token or viewer-ticket rejection EXCEPT expiry — wrong
+ * secret, bad signature, tampered payload, wrong robot, wrong role, and
+ * malformed input all collapse to the same code and the same generic close
+ * reason string. TICKET_EXPIRED is split out on purpose: it is the one
+ * case an ordinary, legitimate client hits often (a ticket that simply
+ * aged past its short TTL) and the correct client behavior differs — ask
+ * the control relay for a fresh ticket and retry — where every other
+ * AUTH_FAILED case means something is actually wrong and retrying with the
+ * same credential will only fail again.
+ */
 export const VIDEO_CLOSE_CODE = {
-  /** A second publisher tried to register while one was already live. 7B
-   * has no authentication, so this is unconditional: see room.ts. */
-  PUBLISHER_OCCUPIED: 4101,
+  // --- Established in Problem 7B/7B.1: numbers unchanged. ---
   /** A publisher sent a binary frame with no preceding header, a header
    * with no following binary, or a binary whose length did not match its
    * header's declared `byteLength`. */
@@ -47,6 +73,28 @@ export const VIDEO_CLOSE_CODE = {
    * ACK_TIMEOUT_MS (room.ts). Releases the room resources that viewer was
    * holding rather than letting it sit as a zombie forever. */
   ACK_TIMEOUT: 4104,
+
+  // --- New in Problem 7C: freshly allocated numbers. ---
+  /** A publisher's token, or a viewer's ticket, failed verification for any
+   * reason other than the ticket having simply expired (see
+   * TICKET_EXPIRED). Deliberately unspecific: never reveals which check
+   * failed. */
+  AUTH_FAILED: 4105,
+  /** A viewer's ticket verified as well-formed and correctly signed but had
+   * already passed its `expiresAt` — the one auth failure worth telling a
+   * legitimate client apart from all others, since the correct response is
+   * simply "ask for a new ticket and retry", not "something is wrong". */
+  TICKET_EXPIRED: 4106,
+  /** A pending (not-yet-registered) publisher or viewer socket did not
+   * complete `publisher.register` / `viewer.register` within
+   * REGISTRATION_TIMEOUT_MS (room.ts). */
+  REGISTRATION_TIMEOUT: 4107,
+  /** An authenticated publisher registered while a different, already
+   * authenticated publisher was live for the same robot — Problem 7C's
+   * authenticated takeover (see room.ts #handlePublisherRegister). Sent to
+   * the OLD (displaced) publisher; the new one gets `publisher.accepted`
+   * as normal. */
+  PUBLISHER_REPLACED: 4108,
 } as const;
 
 /**
@@ -64,6 +112,37 @@ export const MAX_JPEG_BYTES = 256 * 1024;
 
 interface VideoEnvelope {
   readonly v: typeof VIDEO_PROTOCOL_VERSION;
+}
+
+/**
+ * Publisher -> relay: the FIRST message a publisher socket may ever send
+ * (Problem 7C brief §10/§11). A socket that has connected but not yet sent
+ * a valid `publisher.register` is "pending" — not counted as the room's
+ * publisher, and any `frame` header or binary it sends is ignored (see
+ * room.ts). `token` is the static provisioned camera credential
+ * (`VIDEO_PUBLISHER_SECRET`), verified the same constant-time way control's
+ * `device.register` verifies `DEVICE_SECRET` (see @rovelink/protocol's
+ * auth.ts).
+ */
+export interface PublisherRegister extends VideoEnvelope {
+  readonly type: 'publisher.register';
+  readonly robotId: string;
+  readonly token: string;
+}
+
+/**
+ * Viewer -> relay: the FIRST message a viewer socket may ever send (Problem
+ * 7C brief §15). A pending (not yet registered) viewer receives no stream
+ * state, no cached frame, and its `viewer.ack` is ignored — nothing about
+ * the stream is ever handed to a socket that hasn't proven it holds a
+ * valid, currently-live ticket. `ticket` is the short-lived signed token
+ * minted by the CONTROL relay (see @rovelink/protocol's video-ticket.ts);
+ * the video relay never issues these itself, only verifies them.
+ */
+export interface ViewerRegister extends VideoEnvelope {
+  readonly type: 'viewer.register';
+  readonly robotId: string;
+  readonly ticket: string;
 }
 
 /** Relay -> publisher: sent the instant a publisher becomes authoritative
@@ -151,6 +230,8 @@ export interface StreamState extends VideoEnvelope {
 }
 
 export type VideoMessage =
+  | PublisherRegister
+  | ViewerRegister
   | PublisherAccepted
   | PublisherRejected
   | VideoFrameHeader
@@ -198,6 +279,10 @@ export function isVideoMessage(value: unknown): value is VideoMessage {
   const m = value;
 
   switch (m.type) {
+    case 'publisher.register':
+      return typeof m.robotId === 'string' && typeof m.token === 'string';
+    case 'viewer.register':
+      return typeof m.robotId === 'string' && typeof m.ticket === 'string';
     case 'publisher.accepted':
       return typeof m.robotId === 'string' && typeof m.streamSessionId === 'string';
     case 'publisher.rejected':

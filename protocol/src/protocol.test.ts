@@ -98,6 +98,45 @@ test('protocol: a control frame may carry an optional controlSessionId', () => {
   );
 });
 
+test('protocol: controller.videoTicket.request carries no credential, just the envelope', () => {
+  assert.equal(isRemoteMessage({ v: 1, type: 'controller.videoTicket.request' }), true);
+  // Any extra unexpected field (e.g. a smuggled token) does not itself
+  // invalidate the shape — authority never comes from client-supplied
+  // fields on this message, only from the socket's own registration state
+  // (see relay/src/room.ts) — but the message itself carries nothing to
+  // check either way.
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'controller.videoTicket.request', token: 'sneaky' }),
+    true,
+  );
+});
+
+test('protocol: controller.videoTicket response shape', () => {
+  assert.equal(
+    isRemoteMessage({
+      v: 1,
+      type: 'controller.videoTicket',
+      robotId: 'robot-01',
+      ticket: 'abc.def',
+      expiresAt: 12345,
+    }),
+    true,
+  );
+  assert.equal(
+    isRemoteMessage({
+      v: 1,
+      type: 'controller.videoTicket',
+      robotId: 'robot-01',
+      ticket: 'abc.def',
+    }),
+    false,
+  );
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'controller.videoTicket', ticket: 'abc.def', expiresAt: 1 }),
+    false,
+  );
+});
+
 test('protocol: telemetry may carry an optional ackSessionId alongside ackSeq', () => {
   assert.equal(
     isRemoteMessage({ v: 1, type: 'telemetry', sentAt: 5, ackSeq: 3, ackSessionId: 'session-a' }),
