@@ -6,20 +6,17 @@
 
 import type { Gripper } from '@rovelink/protocol';
 
-import type { ButtonAction, Deadzone, GamepadInput, GamepadMapping } from './mapping.ts';
-import {
-  BUTTONS_RELEASED,
-  DEFAULT_DEADZONE,
-  STANDARD_MAPPING,
-  readGamepad,
-  gripperFromButtons,
-  newPresses,
-} from './mapping.ts';
+import { readSemantic } from './controls.ts';
+import type { ButtonAction, GamepadInput } from './mapping.ts';
+import { BUTTONS_RELEASED, gripperFromButtons, newPresses } from './mapping.ts';
+import { evaluateProfile, RACING_PROFILE } from './profile.ts';
+import type { ControllerProfile } from './profile.ts';
 
 export interface GamepadState {
   readonly connected: boolean;
   readonly id: string;
-  /** `standard` means the STANDARD_MAPPING indices are valid. */
+  /** `standard` means controls.ts's STANDARD_AXES/STANDARD_BUTTONS indices
+   * are valid for this controller. */
   readonly mapping: string;
 }
 
@@ -62,8 +59,12 @@ export interface GamepadTarget {
 }
 
 export interface GamepadOptions {
-  readonly mapping?: GamepadMapping;
-  readonly deadzone?: Deadzone;
+  /** The active controller profile — deadzone, inversion, and every
+   * binding live here now (see profile.ts), not as separate options. A
+   * profile change is never applied to a running instance; the caller
+   * stops this listener and starts a fresh one instead (see Problem 6's
+   * profile-switch and settings-open/close safety sequence). */
+  readonly profile?: ControllerProfile;
   /** Minimum axis change to publish. */
   readonly threshold?: number;
 }
@@ -113,8 +114,7 @@ export function listenGamepad(
   handlers: GamepadHandlers,
   options: GamepadOptions = {},
 ): () => void {
-  const mapping = options.mapping ?? STANDARD_MAPPING;
-  const deadzone = options.deadzone ?? DEFAULT_DEADZONE;
+  const profile = options.profile ?? RACING_PROFILE;
   const threshold = options.threshold ?? 0.02;
 
   // Reused each frame: the loop must not allocate per frame.
@@ -166,7 +166,7 @@ export function listenGamepad(
     const axesChanged = copyAxes(rawAxes, gamepad.axes);
     const buttonsChanged = copyButtons(rawButtons, rawButtonValues, gamepad.buttons);
     if (!axesChanged && !buttonsChanged) return;
-    publish(readGamepad(reading, mapping, deadzone));
+    publish(evaluateProfile(readSemantic(reading), profile));
   }
 
   function start(gamepad: GamepadLike): void {
@@ -181,7 +181,7 @@ export function listenGamepad(
     // purely from array-length mismatch, regardless of the actual reading.
     copyAxes(rawAxes, gamepad.axes);
     copyButtons(rawButtons, rawButtonValues, gamepad.buttons);
-    const baseline = readGamepad(reading, mapping, deadzone);
+    const baseline = evaluateProfile(readSemantic(reading), profile);
     prevButtons = baseline.buttons;
     publishedThrottle = baseline.throttle;
     publishedSteering = baseline.steering;
