@@ -14,12 +14,17 @@
  * skipped rather than queued — never "catch up" by sending a backlog of
  * stale frames.
  *
+ * AUTH (Problem 7C): sends `publisher.register { robotId, token }`
+ * immediately on connect, using VIDEO_PUBLISHER_SECRET — the same
+ * provisioned credential a real ESP32-CAM would hold. Never prints the
+ * secret itself, only whether one was configured.
+ *
  * Env vars: VIDEO_RELAY_URL (default ws://localhost:8787), ROBOT_ID
  * (default robot-01), FPS (default 10), DURATION_S (default: run until
- * Ctrl+C).
+ * Ctrl+C), VIDEO_PUBLISHER_SECRET (required).
  */
 
-import { isVideoMessage } from '@rovelink/protocol';
+import { isVideoMessage, VIDEO_PROTOCOL_VERSION } from '@rovelink/protocol';
 import WebSocket from 'ws';
 
 import { buildSimulatedFrame } from './simulated-frame.ts';
@@ -30,6 +35,9 @@ const robotId = process.env.ROBOT_ID ?? 'robot-01';
 const fps = Number(process.env.FPS ?? 10);
 const durationS = process.env.DURATION_S !== undefined ? Number(process.env.DURATION_S) : null;
 const intervalMs = 1000 / fps;
+// Never logged in full: only whether it was configured, and a length hint —
+// enough to debug "I forgot to set it" without ever printing the secret.
+const publisherToken = process.env.VIDEO_PUBLISHER_SECRET ?? '';
 
 let streamSessionId: string | null = null;
 let seq = 0;
@@ -41,9 +49,22 @@ const startedAt = Date.now();
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 console.log(`[publisher] connecting to ${url}/video/${robotId}/publisher (target ${fps} fps)`);
+console.log(
+  `[publisher] VIDEO_PUBLISHER_SECRET configured: ${publisherToken.length > 0} (length ${publisherToken.length})`,
+);
 const ws = new WebSocket(`${url}/video/${robotId}/publisher`);
 
-ws.on('open', () => console.log('[publisher] socket open, awaiting publisher.accepted...'));
+ws.on('open', () => {
+  console.log('[publisher] socket open, registering...');
+  ws.send(
+    JSON.stringify({
+      v: VIDEO_PROTOCOL_VERSION,
+      type: 'publisher.register',
+      robotId,
+      token: publisherToken,
+    }),
+  );
+});
 
 ws.on('message', (data) => {
   const parsed: unknown = JSON.parse(rawDataToText(data));
