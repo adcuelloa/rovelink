@@ -105,6 +105,14 @@ const REGISTRATION_TIMEOUT_MS = 5000;
  * control relay's SWEEP_INTERVAL_MS pattern (`@rovelink/relay`'s room.ts). */
 const SWEEP_INTERVAL_MS = 2000;
 
+/** Standard WebSocket readyState value for OPEN. Used to filter
+ * `state.getWebSockets()` results: the Hibernation API keeps a socket in
+ * that list for the duration of its OWN `webSocketClose`/`webSocketError`
+ * handler, so re-deriving room state (e.g. "is a publisher online") from
+ * inside a close handler without this filter finds the very socket that
+ * is closing and reports it as still present. */
+const WS_READY_STATE_OPEN = 1;
+
 interface InFlight {
   readonly streamSessionId: string;
   readonly seq: number;
@@ -626,7 +634,12 @@ export class VideoRoom implements DurableObject {
   }
 
   #getSockets(role: VideoRole): WebSocket[] {
-    return this.#state.getWebSockets(role);
+    // Excludes a socket still mid-close: the Hibernation API's
+    // getWebSockets() keeps it in the list for the duration of its OWN
+    // webSocketClose/webSocketError handler (see WS_READY_STATE_OPEN),
+    // so without this filter a publisher's own close handler would find
+    // itself here and report the stream as still online.
+    return this.#state.getWebSockets(role).filter((ws) => ws.readyState === WS_READY_STATE_OPEN);
   }
 
   #getRegisteredSockets(role: VideoRole): WebSocket[] {
