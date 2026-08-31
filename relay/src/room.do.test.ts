@@ -15,6 +15,7 @@ import {
   JSON_CODEC,
   PROTOCOL_VERSION,
   SAFE_STATE,
+  verifyVideoTicket,
 } from '@rovelink/protocol';
 import { runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
@@ -26,6 +27,7 @@ type Role = 'device' | 'controller';
 
 const VALID_DEVICE_TOKEN = 'test-device-secret';
 const VALID_CONTROLLER_TOKEN = 'test-controller-secret';
+const VIDEO_TICKET_SECRET = 'test-video-ticket-secret';
 
 async function open(path: string): Promise<{ ws: WebSocket | null; response: Response }> {
   const response = await SELF.fetch(`https://relay.test${path}`, {
@@ -725,5 +727,149 @@ describe('RobotRoom: session-scoped sequencing (Problem 4)', () => {
       ackSeq: 3,
       ackSessionId: 'device-reported-session',
     });
+  });
+});
+
+describe('RobotRoom: video ticket issuance (Problem 7C)', () => {
+  it('an unauthenticated (device-role) socket cannot request a ticket', async () => {
+    const robotId = 'room-ticket-wrong-role';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    await settle();
+
+    const deviceNeverReceives = neverReceives(device!);
+    send(device!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    await settle();
+    expect(deviceNeverReceives()).toBe(false);
+  });
+
+  it('a pending (unregistered) controller cannot request a ticket', async () => {
+    const robotId = 'room-ticket-pending';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    // Deliberately never registers.
+    const controllerNeverReceives = neverReceives(controller!);
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    await settle();
+    expect(controllerNeverReceives()).toBe(false);
+  });
+
+  it('an authenticated controller can request a ticket, scoped to its own robot', async () => {
+    const robotId = 'room-ticket-valid';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    const response = await ticketPromise;
+    expect(response.robotId).toBe(robotId);
+    expect(typeof response.ticket).toBe('string');
+    expect(response.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it('a request cannot smuggle a different robotId: the ticket is always for the room the controller is authenticated to', async () => {
+    const robotId = 'room-ticket-own-robot-only';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    // The request type itself carries no robotId field at all (see
+    // protocol.ts's VideoTicketRequest) — any extra field sent is simply
+    // not part of the schema and cannot influence which robot the ticket
+    // is minted for.
+    send(controller!, {
+      v: PROTOCOL_VERSION,
+      type: 'controller.videoTicket.request',
+      // @ts-expect-error deliberately sending an extra, non-schema field
+      robotId: 'robot-99',
+    });
+    const response = await ticketPromise;
+    expect(response.robotId).toBe(robotId);
+  });
+
+  it('the returned ticket verifies successfully at the video ticket verifier', async () => {
+    const robotId = 'room-ticket-verifies';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    const response = await ticketPromise;
+
+    const result = await verifyVideoTicket(
+      response.ticket,
+      VIDEO_TICKET_SECRET,
+      { robotId, role: 'viewer' },
+      Date.now(),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.payload.robotId).toBe(robotId);
+  });
+
+  it('a tampered copy of a real ticket fails the verifier', async () => {
+    const robotId = 'room-ticket-tamper';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    const response = await ticketPromise;
+
+    const tampered = `${response.ticket}x`;
+    const result = await verifyVideoTicket(
+      tampered,
+      VIDEO_TICKET_SECRET,
+      { robotId, role: 'viewer' },
+      Date.now(),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('the ticket secret itself never appears in the response', async () => {
+    const robotId = 'room-ticket-no-secret-leak';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    const response = await ticketPromise;
+
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain(VIDEO_TICKET_SECRET);
+    expect(serialized).not.toContain('VIDEO_TICKET_SECRET');
+  });
+
+  it('requesting a video ticket does not alter control session/seq/TTL state', async () => {
+    const robotId = 'room-ticket-no-side-effect';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    const session = await waitForMessage(device!, 'controller.session');
+    await settle();
+
+    // A control frame before the ticket request, to establish a baseline.
+    const beforeFrame = waitForMessage(device!, 'control');
+    send(controller!, createControlFrame(SAFE_STATE, 1, Date.now()));
+    const before = await beforeFrame;
+    expect(before.controlSessionId).toBe(session.sessionId);
+
+    // Request a video ticket — pure side channel.
+    const ticketPromise = waitForMessage(controller!, 'controller.videoTicket');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'controller.videoTicket.request' });
+    await ticketPromise;
+
+    // The control session must be exactly what it was before: no new
+    // controller.session was issued, and subsequent control frames still
+    // carry the SAME controlSessionId and continue the SAME seq stream.
+    const afterFrame = waitForMessage(device!, 'control');
+    send(controller!, createControlFrame(SAFE_STATE, 2, Date.now()));
+    const after = await afterFrame;
+    expect(after.controlSessionId).toBe(session.sessionId);
+    expect(after.seq).toBe(2);
   });
 });

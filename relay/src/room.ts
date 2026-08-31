@@ -13,7 +13,7 @@ import type {
   RemoteMessage,
   Role,
 } from '@rovelink/protocol';
-import { CLOSE_CODE, JSON_CODEC, PROTOCOL_VERSION } from '@rovelink/protocol';
+import { CLOSE_CODE, JSON_CODEC, mintVideoTicket, PROTOCOL_VERSION } from '@rovelink/protocol';
 
 import { verifyCredential } from './auth.ts';
 import type { Env } from './index.ts';
@@ -207,6 +207,10 @@ export class RobotRoom implements DurableObject {
         // regardless of seq/session on the device side, so it carries no
         // session identity to check.
         this.#forward('device', message);
+        return;
+      }
+      if (message.type === 'controller.videoTicket.request') {
+        await this.#handleVideoTicketRequest(ws, attachment);
       }
       return;
     }
@@ -402,6 +406,40 @@ export class RobotRoom implements DurableObject {
     for (const other of stale) {
       this.#closeQuietly(other, CLOSE_CODE.OCCUPIED, 'stale-role-reclaimed');
     }
+  }
+
+  /**
+   * Mints a short-lived video viewer ticket for the ALREADY authenticated
+   * controller that asked for it, and sends it back to that socket only
+   * (Problem 7C). Reachable only from inside the `attachment.role ===
+   * 'controller'` branch of webSocketMessage, itself only reachable after
+   * `!attachment.registered` has already returned — so an unauthenticated
+   * or pending socket can never reach this method, and neither can a
+   * device. The request carries no robotId of its own to trust: the
+   * ticket is minted for `attachment.robotId`, i.e. exactly the room this
+   * controller is already authenticated to — there is no path by which a
+   * controller authenticated to one robot could ask for a ticket to
+   * another. This is a pure side-channel: it never touches seq, control
+   * session, TTL, or any other control-path state, and forwards nothing to
+   * the device.
+   */
+  async #handleVideoTicketRequest(ws: WebSocket, attachment: Attachment): Promise<void> {
+    const minted = await mintVideoTicket(
+      {
+        robotId: attachment.robotId,
+        role: 'viewer',
+        controllerSessionId: attachment.controlSessionId,
+      },
+      this.#env.VIDEO_TICKET_SECRET,
+      Date.now(),
+    );
+    this.#send(ws, {
+      v: PROTOCOL_VERSION,
+      type: 'controller.videoTicket',
+      robotId: attachment.robotId,
+      ticket: minted.token,
+      expiresAt: minted.expiresAt,
+    });
   }
 
   /** Relay-authored only — see Attachment.controlSessionId and

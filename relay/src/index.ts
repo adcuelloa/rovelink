@@ -15,6 +15,13 @@ export interface Env {
   /** Shared operator credential sent in `controller.register`. Same
    * single-robot caveat as DEVICE_SECRET. */
   readonly CONTROLLER_SECRET: string;
+  /** Shared ONLY with the video relay (`@rovelink/video-relay`), never
+   * with the browser — signs short-lived video viewer tickets minted here
+   * in response to `controller.videoTicket.request` (Problem 7C). Must be
+   * set to the exact same value as the video relay's own
+   * VIDEO_TICKET_SECRET, or every ticket this relay mints will fail
+   * verification there. */
+  readonly VIDEO_TICKET_SECRET: string;
 }
 
 export default {

@@ -10,8 +10,12 @@
   },
   // SQLite classes: what the free plan supports for Durable Objects.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RobotRoom"] }],
-  // Set with `wrangler secret put DEVICE_SECRET` / `CONTROLLER_SECRET` — never
-  // here. Declaring the names makes `wrangler deploy` fail loudly if either is
-  // missing, instead of silently deploying a relay that fails every auth check.
-  "secrets": { "required": ["DEVICE_SECRET", "CONTROLLER_SECRET"] },
+  // Set with `wrangler secret put DEVICE_SECRET` / `CONTROLLER_SECRET` /
+  // `VIDEO_TICKET_SECRET` — never here. VIDEO_TICKET_SECRET must match the
+  // video relay's own VIDEO_TICKET_SECRET exactly (see
+  // video-relay/wrangler.jsonc) — it is how the two Workers agree a ticket
+  // minted here is genuine. Declaring the names makes `wrangler deploy`
+  // fail loudly if any is missing, instead of silently deploying a relay
+  // that fails every auth check.
+  "secrets": { "required": ["DEVICE_SECRET", "CONTROLLER_SECRET", "VIDEO_TICKET_SECRET"] },
 }

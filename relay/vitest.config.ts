@@ -13,6 +13,7 @@ export default defineConfig({
         bindings: {
           DEVICE_SECRET: 'test-device-secret',
           CONTROLLER_SECRET: 'test-controller-secret',
+          VIDEO_TICKET_SECRET: 'test-video-ticket-secret',
         },
       },
     }),
