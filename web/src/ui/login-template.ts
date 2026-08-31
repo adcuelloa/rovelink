@@ -23,7 +23,7 @@ export const LOGIN_TEMPLATE = `
         required
       />
       <p id="login-error" class="text-alert text-[0.68rem] leading-relaxed" role="alert" hidden></p>
-      <button type="submit" class="button">Connect</button>
+      <button type="submit" id="login-submit" class="button">Connect</button>
       <p class="text-ice-2 text-[0.65rem] leading-relaxed">
         Held only in this tab (sessionStorage) and sent inside the encrypted
         WebSocket connection. Never stored in the app build, never sent anywhere else.

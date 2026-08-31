@@ -7,21 +7,20 @@
  * speak the protocol, so changing transport does not touch it.
  */
 
-import { clearControllerKey, getControllerKey } from './auth/controller-key.ts';
+import { clearControllerKey } from './auth/controller-key.ts';
 import { ControlEngine } from './control/engine.ts';
 import { listenGamepad, NO_GAMEPAD } from './control/gamepad.ts';
 import type { GamepadState } from './control/gamepad.ts';
 import { listenKeyboard } from './control/keyboard.ts';
 import { normalizeGamepadName } from './control/mapping.ts';
 import { InputOwnership } from './control/ownership.ts';
+import type { ControllerProfile } from './control/profile.ts';
+import { loadProfile } from './control/profile-store.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
-import {
-  getConfiguredRobotId,
-  getConfiguredRelayUrl,
-  WebSocketTransport,
-} from './transport/websocket.ts';
+import { getConfiguredRelayUrl, getConfiguredRobotId } from './transport/websocket.ts';
 import { CONTROL_TEMPLATE } from './ui/control-template.ts';
+import { mountControllerSettings } from './ui/controller-settings.ts';
 import { $ } from './ui/dom.ts';
 import { Instruments } from './ui/instruments.ts';
 
@@ -33,6 +32,27 @@ export interface ControlViewOptions {
    * discarded it), or the operator explicitly logged out. Return to the
    * login prompt. */
   readonly onNeedsLogin: (reason: string) => void;
+  readonly session?: ControlSession;
+}
+
+/**
+ * An already-connected, already-AUTHENTICATED transport/sender pair — this
+ * session already received the relay's controller.session for it (see
+ * auth/handshake.ts and main.ts). This view never opens a socket or
+ * decides authentication itself; it is only ever mounted after the fact.
+ * Omitted only for the "no relay configured" dev/misconfiguration
+ * fallback, where a harmless no-op transport is used instead.
+ */
+export interface ControlSession {
+  readonly transport: RobotTransport;
+  readonly sender: ControlSender;
+  /** Every event the transport emitted during the pre-mount handshake, in
+   * order — a real WebSocket OPEN, a room presence broadcast, telemetry,
+   * etc. can all legitimately arrive before this view's own transport
+   * listener exists to see them live. Replayed once, in order, right
+   * after subscribing, so the first paint reflects reality rather than a
+   * stale "just mounted" default. */
+  readonly priorEvents: readonly TransportEvent[];
 }
 
 export function mountControl(app: HTMLElement, options: ControlViewOptions): () => void {
@@ -65,6 +85,11 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   // below.
   const ownership = new InputOwnership();
   let gamepadState: GamepadState = NO_GAMEPAD;
+  // The data-driven profile system (Problem 6): which physical controls
+  // mean what. Loaded once at mount, and swapped only through the settings
+  // panel's safe stop/restart sequence below — never mutated on a running
+  // listener (see gamepad.ts's GamepadOptions doc).
+  let activeProfile: ControllerProfile = loadProfile();
 
   function updateGamepadStatus(): void {
     if (!gamepadState.connected) {
@@ -73,7 +98,7 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     }
     const name = normalizeGamepadName(gamepadState.id);
     const suffix = ownership.active === 'gamepad' ? 'active' : 'connected';
-    instruments.update({ gamepad: `${name} — ${suffix}` });
+    instruments.update({ gamepad: `${name} — ${activeProfile.name} · ${suffix}` });
   }
 
   const applyAxes = (): void => engine.axes(ownership.axes.throttle, ownership.axes.steering);
@@ -141,16 +166,36 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   let unsubscribeTransport: () => void;
 
   // --- configuration check --------------------------------------------------
-  if (relay === undefined) {
-    // No relay configured: show clear error state, do NOT fallback to mock.
-    instruments.update({
-      connection: 'disconnected',
-    });
+  if (options.session) {
+    transport = options.session.transport;
+    sender = options.session.sender;
+    unsubscribeTransport = transport.subscribe(handleTransport);
+    log('info', `transport: ${transport.name}`);
+    sender.start(() => engine.state);
+    // Everything the transport emitted before this listener existed —
+    // WebSocket OPEN, a room presence broadcast, the controller.session
+    // that authenticated it, maybe telemetry — replays through the exact
+    // same handler a live reconnect uses (not a hand-copied duplicate of
+    // its logic), in the order it originally happened, so nothing about
+    // the UI or the device's session-readiness baseline is stuck at a
+    // stale "just mounted" default. Any LATER occurrence of any of these
+    // (e.g. a Problem 2 reconnect while this view stays mounted) is caught
+    // live by this same handler as normal.
+    for (const event of options.session.priorEvents) handleTransport(event);
+  } else {
+    // Not authenticated — either no relay is configured at all, or a
+    // caller bug skipped the handshake. Either way, never open a live
+    // socket without going through it: show a clear error state and wire
+    // a harmless no-op transport so the rest of the UI doesn't crash.
+    instruments.update({ connection: 'disconnected' });
     linkButton.disabled = true;
-    linkButton.textContent = 'No relay configured';
-    log('error', 'VITE_RELAY_URL is not set — cannot connect');
-
-    // Create a no-op transport so the rest of the UI doesn't crash.
+    linkButton.textContent = relay === undefined ? 'No relay configured' : 'Not authenticated';
+    log(
+      'error',
+      relay === undefined
+        ? 'VITE_RELAY_URL is not set — cannot connect'
+        : 'no authenticated session — refusing to connect',
+    );
     transport = {
       name: 'WebSocket',
       robotId,
@@ -162,18 +207,6 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     };
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
-  } else {
-    transport = new WebSocketTransport({
-      url: relay,
-      robotId,
-      token: getControllerKey() ?? undefined,
-    });
-    sender = new ControlSender(transport);
-    unsubscribeTransport = transport.subscribe(handleTransport);
-
-    log('info', `transport: ${transport.name}`);
-    sender.start(() => engine.state);
-    void transport.connect();
   }
 
   // --- wiring ---------------------------------------------------------------
@@ -212,53 +245,67 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     },
   });
 
-  const unsubscribeGamepad = listenGamepad(window, {
-    onAxes: (throttle, steering) => {
-      ownership.setAxes('gamepad', { throttle, steering });
-      // Values here are already deadzoned: nonzero means real, meaningful
-      // stick movement, not idle RAF sampling or sub-deadzone drift.
-      if (throttle !== 0 || steering !== 0) ownership.claim('gamepad');
-      updateGamepadStatus();
-      applyAxes();
-    },
-    onGripper: (gripper) => {
-      ownership.setGripper('gamepad', gripper);
-      // Only becoming active claims ownership; releasing back to idle must
-      // not steal control from whatever source is now driving.
-      if (gripper !== 'idle') ownership.claim('gamepad');
-      updateGamepadStatus();
-      applyGripper();
-    },
-    onAction: (action) => {
-      // Arm/Disarm/E-stop button edges count as meaningful gamepad activity
-      // too, but stay globally effective regardless of who "owns" the axes.
-      ownership.claim('gamepad');
-      updateGamepadStatus();
-      if (action === 'stop') emergencyStop();
-      else if (action === 'arm') engine.arm(true);
-      else if (action === 'disarm') engine.arm(false);
-    },
-    onState: (state) => {
-      gamepadState = state;
-      updateGamepadStatus();
-      log(
-        'info',
-        state.connected ? `gamepad: ${normalizeGamepadName(state.id)}` : 'gamepad disconnected',
-      );
-      if (!state.connected) {
-        // Mirrors the WebSocket-transport-loss handling below: unconditional
-        // safe state, whether or not the engine was armed, whether or not
-        // the gamepad currently owns the axes. A vanished controller must
-        // never leave the vehicle driving on stale input. The transport
-        // itself is still connected here, so the ordinary sequenced update
-        // (not the urgent emergencyStop bypass) reaches the robot right
-        // away; rhythm.ts's decideSend already skips re-sending an
-        // unchanged disarmed/idle state, so this does not spam the link
-        // when the engine was already safe.
-        engine.safeState('disconnect');
-      }
-    },
-  });
+  // Re-invokable rather than a one-shot const: the settings panel and a
+  // profile switch both need to stop this listener and start a fresh one
+  // against the (possibly new) activeProfile — see openControllerSettings
+  // below. A fresh listener re-baselines against whatever is currently
+  // held (Problem 5's connect-time baseline fix), so switching mid-hold
+  // never carries stale movement into the new profile.
+  function startGamepadListener(): () => void {
+    return listenGamepad(
+      window,
+      {
+        onAxes: (throttle, steering) => {
+          ownership.setAxes('gamepad', { throttle, steering });
+          // Values here are already deadzoned: nonzero means real, meaningful
+          // stick movement, not idle RAF sampling or sub-deadzone drift.
+          if (throttle !== 0 || steering !== 0) ownership.claim('gamepad');
+          updateGamepadStatus();
+          applyAxes();
+        },
+        onGripper: (gripper) => {
+          ownership.setGripper('gamepad', gripper);
+          // Only becoming active claims ownership; releasing back to idle must
+          // not steal control from whatever source is now driving.
+          if (gripper !== 'idle') ownership.claim('gamepad');
+          updateGamepadStatus();
+          applyGripper();
+        },
+        onAction: (action) => {
+          // Arm/Disarm/E-stop button edges count as meaningful gamepad activity
+          // too, but stay globally effective regardless of who "owns" the axes.
+          ownership.claim('gamepad');
+          updateGamepadStatus();
+          if (action === 'stop') emergencyStop();
+          else if (action === 'arm') engine.arm(true);
+          else if (action === 'disarm') engine.arm(false);
+        },
+        onState: (state) => {
+          gamepadState = state;
+          updateGamepadStatus();
+          log(
+            'info',
+            state.connected ? `gamepad: ${normalizeGamepadName(state.id)}` : 'gamepad disconnected',
+          );
+          if (!state.connected) {
+            // Mirrors the WebSocket-transport-loss handling below: unconditional
+            // safe state, whether or not the engine was armed, whether or not
+            // the gamepad currently owns the axes. A vanished controller must
+            // never leave the vehicle driving on stale input. The transport
+            // itself is still connected here, so the ordinary sequenced update
+            // (not the urgent emergencyStop bypass) reaches the robot right
+            // away; rhythm.ts's decideSend already skips re-sending an
+            // unchanged disarmed/idle state, so this does not spam the link
+            // when the engine was already safe.
+            engine.safeState('disconnect');
+          }
+        },
+      },
+      { profile: activeProfile },
+    );
+  }
+
+  let unsubscribeGamepad = startGamepadListener();
 
   function emergencyStop(): void {
     engine.emergencyStop();
@@ -267,8 +314,39 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     log('error', 'EMERGENCY STOP');
   }
 
+  // --- controller settings ----------------------------------------------------
+  // Opening the panel forces SAFE_STATE and stops the driving gamepad
+  // listener entirely — the settings view polls navigator.getGamepads() on
+  // its own from there, with no reference to ControlEngine, so a captured
+  // control physically cannot drive the robot (see controller-settings.ts).
+  // Closing starts a fresh listener against whatever profile ended up
+  // active — Problem 5's connect-time baseline means currently-held
+  // controls are ignored until released/re-pressed, and the operator must
+  // explicitly Arm again either way.
+  let closeSettings: (() => void) | null = null;
+
+  function openControllerSettings(): void {
+    if (closeSettings !== null) return;
+    engine.safeState();
+    unsubscribeGamepad();
+    log('info', 'controller settings opened — disarmed');
+    closeSettings = mountControllerSettings({
+      onClose: (profile) => {
+        closeSettings = null;
+        activeProfile = profile;
+        unsubscribeGamepad = startGamepadListener();
+        updateGamepadStatus();
+        log('info', `controller settings closed — profile: ${profile.name}`);
+      },
+    });
+  }
+
   const abort = new AbortController();
   const { signal } = abort;
+
+  $('#btn-controller-settings', HTMLButtonElement).addEventListener('click', openControllerSettings, {
+    signal,
+  });
 
   $('#btn-arm', HTMLButtonElement).addEventListener('click', () => engine.arm(true), { signal });
   $('#btn-disarm', HTMLButtonElement).addEventListener('click', () => engine.arm(false), {
@@ -334,6 +412,7 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
 
   return () => {
     abort.abort();
+    closeSettings?.();
     unsubscribeKeyboard();
     unsubscribeGamepad();
     unsubscribeEngine();

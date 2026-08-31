@@ -386,6 +386,107 @@ body {
   .log li[data-level='error'] {
     @apply border-alert text-alert;
   }
+
+  /* --- controller settings (Problem 6) --- */
+
+  .settings-overlay {
+    @apply fixed inset-0 z-50 grid place-items-center overflow-y-auto p-3;
+    background: rgb(19 19 24 / 0.82);
+    backdrop-filter: blur(2px);
+  }
+
+  .settings-panel {
+    @apply my-auto w-full max-w-135;
+  }
+
+  .settings-body {
+    @apply grid gap-4 p-4;
+  }
+
+  .settings-profiles {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .settings-profiles .button[aria-pressed='true'] {
+    @apply border-sodium bg-sodium text-carbon;
+  }
+
+  .controller-diagram {
+    @apply border-groove grid place-items-center rounded-md border bg-white/[0.03] p-2;
+  }
+
+  .controller-diagram__svg {
+    @apply w-full max-w-100;
+  }
+
+  .controller-diagram__body {
+    fill: var(--color-panel);
+    stroke: var(--color-groove);
+    stroke-width: 2;
+  }
+
+  .controller-diagram__svg rect:not(.controller-diagram__body),
+  .controller-diagram__svg circle {
+    fill: rgb(255 255 255 / 0.08);
+    stroke: var(--color-groove);
+    stroke-width: 1;
+    transition:
+      fill 100ms ease-out,
+      stroke 100ms ease-out;
+  }
+
+  .controller-diagram__svg .controller-diagram__active {
+    fill: var(--color-sodium);
+    stroke: var(--color-sodium);
+  }
+
+  .settings-live {
+    @apply grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3;
+  }
+
+  .settings-live__row {
+    @apply grid gap-0.5;
+  }
+
+  .settings-live__value {
+    font-family: var(--font-mono);
+    @apply text-ice text-sm tabular-nums;
+  }
+
+  .settings-live__value meter {
+    @apply w-full;
+    accent-color: var(--color-sodium);
+  }
+
+  .binding-list {
+    @apply border-groove grid gap-1 rounded-md border p-2;
+  }
+
+  .binding-row {
+    @apply grid grid-cols-[1fr_auto_auto] items-center gap-3 px-1 py-1.5;
+  }
+
+  .binding-row__value {
+    font-family: var(--font-mono);
+    @apply text-ice-2 text-xs;
+  }
+
+  .binding-row__rebind {
+    @apply min-h-8 px-3 text-[0.6rem];
+  }
+
+  .settings-capture {
+    @apply border-sodium/60 text-sodium rounded-md border px-3 py-2 text-xs;
+    background: color-mix(in oklab, var(--color-sodium) 10%, transparent);
+  }
+
+  .settings-conflicts {
+    @apply border-alert text-alert grid gap-1 rounded-md border px-3 py-2 text-xs;
+  }
+
+  .settings-reset {
+    @apply flex flex-wrap gap-2;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

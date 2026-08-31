@@ -46,6 +46,9 @@ export const CONTROL_TEMPLATE = `
     <div class="module__header">
       <h1 id="chassis-title" class="label">Differential drive</h1>
       <p class="label" id="controller-status">Controller: not detected</p>
+      <button type="button" class="label hover:text-ice" id="btn-controller-settings">
+        Controller settings
+      </button>
     </div>
 
     <div class="grid place-items-center px-3 py-4">
