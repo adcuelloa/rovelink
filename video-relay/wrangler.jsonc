@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rovelink-video-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": { "enabled": true },
+  // One video room per robot, deliberately its own Worker/DO deployment
+  // (not a binding added to the control relay's wrangler.jsonc): video
+  // congestion, a crashed video room, or a redeploy of this Worker must
+  // never be able to affect `rovelink-relay` (control) in any way, and
+  // separate Workers is what makes that true at the infrastructure level,
+  // not just in application code. See Problem 7B brief §1/§9.
+  "durable_objects": {
+    "bindings": [{ "name": "VIDEO_ROOMS", "class_name": "VideoRoom" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VideoRoom"] }],
+  // 7B is deliberately unauthenticated (Problem 7C adds publisher/viewer
+  // auth) — no secrets are declared here yet.
+}

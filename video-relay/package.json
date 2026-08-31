@@ -1,0 +1,27 @@
+{
+  "name": "@rovelink/video-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy",
+    "typecheck": "oxlint --type-aware --type-check .",
+    "build": "echo 'wrangler bundles at deploy time; typecheck verifies types'",
+    "test": "node --test src/route.test.ts src/dev/*.test.ts && vitest run",
+    "dev:publisher": "node --experimental-strip-types src/dev/publisher-cli.ts",
+    "dev:viewer": "node --experimental-strip-types src/dev/viewer-cli.ts"
+  },
+  "dependencies": {
+    "@rovelink/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260829.1",
+    "@types/node": "26.4.0",
+    "@types/ws": "8.18.1",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.1",
+    "ws": "8.18.1"
+  }
+}

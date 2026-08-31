@@ -4,6 +4,7 @@ packages:
   - protocol
   - web
   - relay
+  - video-relay
 
 # wrangler downloads and links its binaries (workerd and esbuild) on install;
 # without this permission pnpm blocks its scripts and the installation fails.
