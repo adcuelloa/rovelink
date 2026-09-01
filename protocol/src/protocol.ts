@@ -128,6 +128,35 @@ export interface EmergencyStop extends Envelope {
   readonly reason?: string;
 }
 
+/**
+ * Device -> relay -> controller (Problem 8A): sent by the firmware
+ * immediately after a `control` frame has passed session/seq/safety
+ * validation and its resulting logical control state has been applied —
+ * never for a rejected frame (wrong session, stale/duplicate seq, or an
+ * armed=true frame arriving before a fresh session's disarmed baseline).
+ * Proof of application, not proof of receipt. The relay forwards this
+ * exactly like `telemetry` — a device-originated message, so it also
+ * counts as evidence of device freshness (see relay/src/room.ts's #touch).
+ */
+export interface ControlAck extends Envelope {
+  readonly type: 'control.ack';
+  readonly controlSessionId: string;
+  readonly seq: number;
+}
+
+/**
+ * Device -> relay -> controller (Problem 8A): sent immediately after the
+ * firmware has applied an `emergency-stop`. Emergency-stop is deliberately
+ * session/seq-independent (see EmergencyStop) — it has no controlSessionId
+ * or seq to correlate by, so this instead echoes the triggering message's
+ * own `sentAt` verbatim, which the browser uses to match it against its
+ * pending E-stop RTT measurement.
+ */
+export interface EmergencyStopAck extends Envelope {
+  readonly type: 'emergency-stop.ack';
+  readonly sentAt: number;
+}
+
 /** Room presence: published by the relay to both ends. */
 export interface RoomState extends Envelope {
   readonly type: 'room';
@@ -168,6 +197,8 @@ export type RemoteMessage =
   | Ping
   | Pong
   | EmergencyStop
+  | ControlAck
+  | EmergencyStopAck
   | RoomState
   | VideoTicketRequest
   | VideoTicketResponse;
@@ -237,6 +268,10 @@ export function isRemoteMessage(value: unknown): value is RemoteMessage {
       return isNumber(m.id) && isNumber(m.sentAt) && isNumber(m.echoAt);
     case 'emergency-stop':
       return isNumber(m.sentAt) && isOptionalString(m.reason);
+    case 'control.ack':
+      return typeof m.controlSessionId === 'string' && isNumber(m.seq);
+    case 'emergency-stop.ack':
+      return isNumber(m.sentAt);
     case 'room':
       return (
         typeof m.robotId === 'string' &&

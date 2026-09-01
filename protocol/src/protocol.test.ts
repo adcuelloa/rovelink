@@ -144,3 +144,22 @@ test('protocol: telemetry may carry an optional ackSessionId alongside ackSeq', 
   );
   assert.equal(isRemoteMessage({ v: 1, type: 'telemetry', sentAt: 5, ackSessionId: 7 }), false);
 });
+
+test('protocol: control.ack requires controlSessionId and seq', () => {
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'control.ack', controlSessionId: 'session-a', seq: 3 }),
+    true,
+  );
+  assert.equal(isRemoteMessage({ v: 1, type: 'control.ack', seq: 3 }), false);
+  assert.equal(
+    isRemoteMessage({ v: 1, type: 'control.ack', controlSessionId: 'session-a' }),
+    false,
+  );
+  assert.equal(isRemoteMessage({ v: 1, type: 'control.ack', controlSessionId: 42, seq: 3 }), false);
+});
+
+test('protocol: emergency-stop.ack requires only sentAt, no session/seq', () => {
+  assert.equal(isRemoteMessage({ v: 1, type: 'emergency-stop.ack', sentAt: 1700000000000 }), true);
+  assert.equal(isRemoteMessage({ v: 1, type: 'emergency-stop.ack' }), false);
+  assert.equal(isRemoteMessage({ v: 1, type: 'emergency-stop.ack', sentAt: 'now' }), false);
+});
