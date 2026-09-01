@@ -31,7 +31,7 @@ export const CONTROL_TEMPLATE = `
       <span class="label">Robot</span>
       <b id="robot-id-value">robot-01</b>
     </p>
-    <p class="status-light" id="chip-robot" data-on="false" role="status">Offline</p>
+    <p class="status-light" id="chip-robot" data-health="offline" role="status">Offline</p>
     <p class="status-light" id="chip-armed" data-on="false" role="status">Safe</p>
     <p class="label flex items-center gap-2">
       Transport: <b>WebSocket</b>
@@ -123,7 +123,10 @@ export const CONTROL_TEMPLATE = `
     </div>
     <dl class="bus">
       ${DATA_POINT('tel-connection', 'Link', 'Disconnected')}
-      ${DATA_POINT('tel-rtt', 'RTT', '—')}
+      ${DATA_POINT('tel-lastseen', 'Last seen', '—')}
+      ${DATA_POINT('tel-control-rtt', 'Control RTT', 'Measuring…')}
+      ${DATA_POINT('tel-rtt', 'Relay RTT', '—')}
+      ${DATA_POINT('tel-estop-rtt', 'E-stop RTT', '—')}
       ${DATA_POINT('tel-rssi', 'RSSI', '—')}
       ${DATA_POINT('tel-seq', 'Seq', '0')}
       ${DATA_POINT('tel-sent', 'TX', '0')}

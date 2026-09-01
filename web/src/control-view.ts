@@ -16,6 +16,7 @@ import { normalizeGamepadName } from './control/mapping.ts';
 import { InputOwnership } from './control/ownership.ts';
 import { loadProfile } from './control/profile-store.ts';
 import type { ControllerProfile } from './control/profile.ts';
+import { computeDeviceHealth, formatLastSeen } from './health/device-health.ts';
 import { ControlSender } from './transport/sender.ts';
 import type { TransportEvent, RobotTransport, AlertLevel } from './transport/types.ts';
 import {
@@ -128,6 +129,32 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   let sender: ControlSender;
   let linked = false;
 
+  // --- device freshness (Problem 8A) -----------------------------------------
+  // `performance.now()`-based, entirely local: only ever advanced by real
+  // device-originated evidence ('device-activity'), never by a control
+  // frame the operator sent, a relay pong, or a bare 'robot' presence
+  // broadcast. Ticked on a local display timer (updateDeviceHealth, wired
+  // below) rather than only on new transport events, so "Last seen" keeps
+  // counting up even while nothing new arrives.
+  let lastDeviceActivityAt: number | null = null;
+
+  function updateDeviceHealth(): void {
+    const now = performance.now();
+    const deviceOnline = instruments.readings.robotOnline;
+    instruments.update({
+      deviceHealth: computeDeviceHealth(deviceOnline, lastDeviceActivityAt, now),
+      lastSeenText: formatLastSeen(lastDeviceActivityAt, now),
+    });
+  }
+
+  // Control RTT arrives on every accepted/applied driving frame — smoothed
+  // with a light EWMA (Problem 8A §G) so the reading doesn't jump around
+  // with every single sample while driving continuously. E-stop RTT is
+  // shown as its last raw sample instead: e-stops are rare, discrete safety
+  // events where averaging would hide the actual number that matters.
+  const CONTROL_RTT_EWMA_ALPHA = 0.25;
+  let controlRttEwma: number | null = null;
+
   function handleTransport(event: TransportEvent): void {
     switch (event.kind) {
       case 'state':
@@ -146,9 +173,25 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
         return;
       case 'robot':
         instruments.update({ robotOnline: event.online });
+        updateDeviceHealth();
         return;
-      case 'rtt':
+      case 'device-activity':
+        lastDeviceActivityAt = event.at;
+        updateDeviceHealth();
+        return;
+      case 'relay-rtt':
         instruments.update({ rtt: event.ms });
+        return;
+      case 'control-rtt':
+        controlRttEwma =
+          controlRttEwma === null
+            ? event.ms
+            : controlRttEwma + CONTROL_RTT_EWMA_ALPHA * (event.ms - controlRttEwma);
+        instruments.update({ controlRtt: Math.round(controlRttEwma) });
+        return;
+      case 'estop-rtt':
+        instruments.update({ estopRtt: event.ms });
+        log('info', `e-stop ack round trip: ${event.ms} ms`);
         return;
       case 'telemetry':
         instruments.update({
@@ -183,6 +226,12 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
         // relay's own authoritative notification.
         engine.safeState();
         sender.establishSessionBaseline();
+        // A fresh session's RTT samples must never be averaged together
+        // with the previous one's (Problem 8A §N: "no stale samples from
+        // previous session") — restart the EWMA from empty rather than
+        // carry a number computed before this reconnect.
+        controlRttEwma = null;
+        instruments.update({ controlRtt: null });
         log('info', 'control session established — disarmed');
         // Video is only ever allowed to start in direct response to this
         // same authoritative event (Problem 7D §3) — never merely because
@@ -237,6 +286,12 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     sender = new ControlSender(transport);
     unsubscribeTransport = transport.subscribe(handleTransport);
   }
+
+  // Local display timer only — sends nothing over the network. Keeps "Last
+  // seen" counting up and re-evaluates Online/Unresponsive even when no new
+  // transport event has arrived recently.
+  const deviceHealthTimer = setInterval(updateDeviceHealth, 200);
+  updateDeviceHealth();
 
   // --- wiring ---------------------------------------------------------------
   const unsubscribeEngine = engine.subscribe(({ state, reason }) => {
@@ -445,6 +500,7 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
 
   return () => {
     abort.abort();
+    clearInterval(deviceHealthTimer);
     closeSettings?.();
     unsubscribeKeyboard();
     unsubscribeGamepad();

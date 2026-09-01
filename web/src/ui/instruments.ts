@@ -9,6 +9,7 @@
 import type { Gripper } from '@rovelink/protocol';
 import { differentialMix, wheelPwm } from '@rovelink/protocol';
 
+import type { DeviceHealth } from '../health/device-health.ts';
 import type { TransportState } from '../transport/types.ts';
 import { $ } from './dom.ts';
 
@@ -18,8 +19,25 @@ export interface Readings {
   readonly gripper: Gripper;
   readonly armed: boolean;
   readonly robotOnline: boolean;
+  /** Online/Unresponsive/Offline (Problem 8A) — see health/device-health.ts.
+   * `robotOnline` above stays the raw relay-authoritative presence: it is
+   * what control-view.ts reads back (via `instruments.readings`) to
+   * recompute this on its local freshness timer, without needing its own
+   * separate copy of relay presence. */
+  readonly deviceHealth: DeviceHealth;
+  /** Pre-formatted by health/device-health.ts's formatLastSeen — Instruments
+   * only paints, it does not compute freshness or own a clock. */
+  readonly lastSeenText: string;
   readonly connection: TransportState;
+  /** Relay RTT: browser <-> Cloudflare edge, never touching the device. */
   readonly rtt: number | null;
+  /** Control RTT: browser -> relay -> device -> relay -> browser, smoothed
+   * (EWMA, see control-view.ts). `null` before the first sample of the
+   * current session — rendered as "Measuring…", never a fabricated 0. */
+  readonly controlRtt: number | null;
+  /** Last E-stop round trip, same path as Control RTT but for an
+   * emergency-stop specifically — raw, not smoothed (Problem 8A). */
+  readonly estopRtt: number | null;
   readonly rssi: number | null;
   readonly seq: number;
   readonly sent: number;
@@ -35,8 +53,12 @@ export const INITIAL_READINGS: Readings = {
   gripper: 'idle',
   armed: false,
   robotOnline: false,
+  deviceHealth: 'offline',
+  lastSeenText: '—',
   connection: 'disconnected',
   rtt: null,
+  controlRtt: null,
+  estopRtt: null,
   rssi: null,
   seq: 0,
   sent: 0,
@@ -50,6 +72,12 @@ const CONNECTION_TEXT: Record<TransportState, string> = {
   disconnected: 'Disconnected',
   connecting: 'Connecting…',
   connected: 'Connected',
+};
+
+const DEVICE_HEALTH_TEXT: Record<DeviceHealth, string> = {
+  online: 'Online',
+  unresponsive: 'Unresponsive',
+  offline: 'Offline',
 };
 
 /** Gripper jaw opening, in degrees per side. */
@@ -74,6 +102,9 @@ export class Instruments {
   readonly #armButton = $('#btn-arm', HTMLButtonElement);
   readonly #linkValue = $('#tel-connection', HTMLElement);
   readonly #rttValue = $('#tel-rtt', HTMLElement);
+  readonly #controlRttValue = $('#tel-control-rtt', HTMLElement);
+  readonly #estopRttValue = $('#tel-estop-rtt', HTMLElement);
+  readonly #lastSeenValue = $('#tel-lastseen', HTMLElement);
   readonly #rssiValue = $('#tel-rssi', HTMLElement);
   readonly #seqValue = $('#tel-seq', HTMLElement);
   readonly #sentValue = $('#tel-sent', HTMLElement);
@@ -132,13 +163,21 @@ export class Instruments {
       this.#armedChip.dataset.on = String(a.armed);
       this.#armButton.setAttribute('aria-pressed', String(a.armed));
     }
-    if (a.robotOnline !== p.robotOnline) {
-      this.#robotChip.textContent = a.robotOnline ? 'Online' : 'Offline';
-      this.#robotChip.dataset.on = String(a.robotOnline);
+    if (a.deviceHealth !== p.deviceHealth) {
+      this.#robotChip.textContent = DEVICE_HEALTH_TEXT[a.deviceHealth];
+      this.#robotChip.dataset.health = a.deviceHealth;
     }
 
     if (a.connection !== p.connection) this.#linkValue.textContent = CONNECTION_TEXT[a.connection];
     if (a.rtt !== p.rtt) this.#rttValue.textContent = a.rtt === null ? '—' : `${a.rtt} ms`;
+    if (a.controlRtt !== p.controlRtt) {
+      this.#controlRttValue.textContent =
+        a.controlRtt === null ? 'Measuring…' : `${a.controlRtt} ms`;
+    }
+    if (a.estopRtt !== p.estopRtt) {
+      this.#estopRttValue.textContent = a.estopRtt === null ? '—' : `${a.estopRtt} ms`;
+    }
+    if (a.lastSeenText !== p.lastSeenText) this.#lastSeenValue.textContent = a.lastSeenText;
     if (a.rssi !== p.rssi) this.#rssiValue.textContent = a.rssi === null ? '—' : `${a.rssi} dBm`;
     if (a.seq !== p.seq) this.#seqValue.textContent = String(a.seq);
     if (a.sent !== p.sent) this.#sentValue.textContent = String(a.sent);

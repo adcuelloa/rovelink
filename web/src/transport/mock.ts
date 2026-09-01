@@ -129,7 +129,7 @@ export class MockTransport implements RobotTransport {
       return;
     }
     this.#robotState = applyArmed(frame);
-    this.#emitter.emit({ kind: 'rtt', ms: Math.round(this.#delay() * 2) });
+    this.#emitter.emit({ kind: 'relay-rtt', ms: Math.round(this.#delay() * 2) });
   }
 
   #emitTelemetry(): void {
@@ -144,8 +144,9 @@ export class MockTransport implements RobotTransport {
       armed: this.#robotState.armed,
     };
     this.#count({ received: this.#counters.received + 1 });
+    this.#emitter.emit({ kind: 'device-activity', at: performance.now() });
     this.#emitter.emit({ kind: 'telemetry', data });
-    this.#emitter.emit({ kind: 'rtt', ms: Math.round(this.#delay() * 2) });
+    this.#emitter.emit({ kind: 'relay-rtt', ms: Math.round(this.#delay() * 2) });
   }
 
   #count(partial: Partial<Counters>): void {

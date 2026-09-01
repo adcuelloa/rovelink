@@ -10,6 +10,7 @@ import type { ControlState, RemoteMessage } from '@rovelink/protocol';
 import { CLOSE_CODE, JSON_CODEC, PROTOCOL_VERSION, createControlFrame } from '@rovelink/protocol';
 
 import type { VideoTicketOutcome, VideoTicketSource } from '../video/ticket-source.ts';
+import { PendingAckTracker } from './pending-acks.ts';
 import type { Counters, RobotTransport, TransportListener } from './types.ts';
 import { INITIAL_COUNTS, Emitter } from './types.ts';
 
@@ -17,6 +18,12 @@ import { INITIAL_COUNTS, Emitter } from './types.ts';
  * before giving up (Problem 7D §4). Well above a normal round trip, well
  * below anything a human would notice as a hang. */
 const VIDEO_TICKET_TIMEOUT_MS = 8000;
+
+/** Control/E-stop RTT tracking (Problem 8A): well above any real round
+ * trip, so a lost ack still gets swept out promptly rather than lingering. */
+const PENDING_ACK_MAX_AGE_MS = 5000;
+const PENDING_CONTROL_ACK_MAX = 64;
+const PENDING_ESTOP_ACK_MAX = 8;
 
 export interface WebSocketOptions {
   /** Relay base URL, e.g. `wss://relay.example.workers.dev`. */
@@ -81,6 +88,26 @@ export class WebSocketTransport implements RobotTransport, VideoTicketSource {
   #wantConnection = false;
   #pendingTicketRequest: PendingTicketRequest | null = null;
 
+  /** The relay-minted session this transport is currently authoritative
+   * under (see 'controller.session' in #handle) — never client-invented.
+   * `undefined` until the first session is established. Used only to key
+   * outgoing control frames for #controlAcks; never sent anywhere. */
+  #currentSessionId: string | undefined;
+  /** Keyed by `${sessionId}|${seq}` so a delayed ack from a superseded
+   * session can never be mismatched against a same-numbered frame from the
+   * current one. */
+  readonly #controlAcks = new PendingAckTracker<string>({
+    maxAgeMs: PENDING_ACK_MAX_AGE_MS,
+    maxSize: PENDING_CONTROL_ACK_MAX,
+  });
+  /** Keyed by the emergency-stop's own `sentAt`: e-stop is deliberately
+   * session/seq-independent (see EmergencyStop in protocol.ts), so it has
+   * nothing else to correlate by. */
+  readonly #estopAcks = new PendingAckTracker<number>({
+    maxAgeMs: PENDING_ACK_MAX_AGE_MS,
+    maxSize: PENDING_ESTOP_ACK_MAX,
+  });
+
   constructor(options: WebSocketOptions) {
     this.#url = options.url.replace(/\/+$/, '');
     this.robotId = options.robotId ?? 'robot-01';
@@ -119,17 +146,29 @@ export class WebSocketTransport implements RobotTransport, VideoTicketSource {
     if (this.#ws !== null) this.#failPendingTicketRequestFor(this.#ws);
     this.#ws?.close();
     this.#ws = null;
+    // Nothing sent on this connection can ever be acked now — an in-flight
+    // RTT measurement must never resolve, or worse be mismatched, against
+    // whatever session/seq a future reconnect starts from.
+    this.#currentSessionId = undefined;
+    this.#controlAcks.clear();
+    this.#estopAcks.clear();
     this.#emitter.emit({ kind: 'robot', online: false });
     this.#emitter.emit({ kind: 'state', state: 'disconnected' });
   }
 
   sendControl(state: ControlState): void {
     this.#seq += 1;
-    this.#send(createControlFrame(state, this.#seq, Date.now()));
+    const seq = this.#seq;
+    this.#send(createControlFrame(state, seq, Date.now()));
+    if (this.#currentSessionId !== undefined) {
+      this.#controlAcks.record(`${this.#currentSessionId}|${seq}`, performance.now());
+    }
   }
 
   emergencyStop(): void {
-    this.#send({ v: PROTOCOL_VERSION, type: 'emergency-stop', sentAt: Date.now() });
+    const sentAt = Date.now();
+    this.#send({ v: PROTOCOL_VERSION, type: 'emergency-stop', sentAt });
+    this.#estopAcks.record(sentAt, performance.now());
   }
 
   /**
@@ -211,6 +250,12 @@ export class WebSocketTransport implements RobotTransport, VideoTicketSource {
       this.#failPendingTicketRequestFor(ws);
       if (this.#ws !== ws) return;
       this.#ws = null;
+      // Same reasoning as disconnect(): a reconnect starts a fresh session
+      // and fresh seq bookkeeping, so nothing still in flight on the old
+      // socket may ever resolve against it.
+      this.#currentSessionId = undefined;
+      this.#controlAcks.clear();
+      this.#estopAcks.clear();
       this.#emitter.emit({ kind: 'robot', online: false });
       this.#emitter.emit({ kind: 'state', state: 'disconnected' });
 
@@ -236,21 +281,50 @@ export class WebSocketTransport implements RobotTransport, VideoTicketSource {
   #handle(message: RemoteMessage): void {
     switch (message.type) {
       case 'telemetry':
+        // Real device-originated evidence: emitted separately from the
+        // telemetry payload itself so freshness tracking never has to be
+        // inferred from anything else (a control frame, a relay pong, a
+        // local timer, or `room` presence) — see TransportEvent's
+        // 'device-activity' doc.
+        this.#emitter.emit({ kind: 'device-activity', at: performance.now() });
         this.#emitter.emit({ kind: 'telemetry', data: message });
         return;
       case 'room':
         this.#emitter.emit({ kind: 'robot', online: message.deviceOnline });
         return;
       case 'pong':
-        this.#emitter.emit({ kind: 'rtt', ms: Math.max(0, Date.now() - message.sentAt) });
+        this.#emitter.emit({ kind: 'relay-rtt', ms: Math.max(0, Date.now() - message.sentAt) });
         return;
       case 'controller.session':
         // Relay-authored authoritative confirmation only (see room.ts
         // #handleControllerRegister) — this type is never sent to a
         // controller for any other reason, so no further check is needed
         // here beyond having arrived on this authenticated connection.
+        //
+        // A session change resets Control RTT tracking (Problem 8A): any
+        // ack still pending belonged to a now-superseded session and could
+        // otherwise be matched against a same-numbered frame from this new
+        // one. Recorded BEFORE emitting 'session-established' — that event
+        // synchronously triggers establishSessionBaseline()'s own
+        // sendControl() call, which must see the new session id already in
+        // place.
+        this.#currentSessionId = message.sessionId;
+        this.#controlAcks.clear();
         this.#emitter.emit({ kind: 'session-established' });
         return;
+      case 'control.ack': {
+        const rtt = this.#controlAcks.resolve(
+          `${message.controlSessionId}|${message.seq}`,
+          performance.now(),
+        );
+        if (rtt !== null) this.#emitter.emit({ kind: 'control-rtt', ms: Math.round(rtt) });
+        return;
+      }
+      case 'emergency-stop.ack': {
+        const rtt = this.#estopAcks.resolve(message.sentAt, performance.now());
+        if (rtt !== null) this.#emitter.emit({ kind: 'estop-rtt', ms: Math.round(rtt) });
+        return;
+      }
       case 'controller.videoTicket':
         if (this.#pendingTicketRequest !== null) {
           clearTimeout(this.#pendingTicketRequest.timeout);

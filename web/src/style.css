@@ -114,9 +114,20 @@ body {
     @apply size-1.5 rounded-full bg-current;
   }
 
-  .status-light[data-on='true'] {
+  .status-light[data-on='true'],
+  .status-light[data-health='online'] {
     @apply border-groove/60 text-sodium;
     box-shadow: inset 0 0 12px -6px var(--color-sodium);
+  }
+
+  /* Relay still reports the device registered, but real device-originated
+   * activity has gone stale past the local freshness threshold (Problem
+   * 8A) — distinct from both a healthy Online and an authoritative
+   * relay-declared Offline. */
+  .status-light[data-health='unresponsive'] {
+    @apply border-groove/60;
+    color: var(--color-danger);
+    box-shadow: inset 0 0 12px -6px var(--color-danger);
   }
 
   /* --- chassis: top-down view of the cart, the main piece --- */

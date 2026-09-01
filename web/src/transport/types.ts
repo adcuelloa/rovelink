@@ -24,7 +24,27 @@ export type TransportEvent =
   | { readonly kind: 'state'; readonly state: TransportState }
   | { readonly kind: 'robot'; readonly online: boolean }
   | { readonly kind: 'telemetry'; readonly data: Telemetry }
-  | { readonly kind: 'rtt'; readonly ms: number }
+  /** Real evidence that the physical device itself produced something —
+   * currently only a `telemetry` receipt, later also a `control.ack` (see
+   * Problem 8A). Deliberately its own event, separate from `telemetry`'s
+   * payload: this is what device-freshness/"Last seen" tracking reads, and
+   * it must never be inferred from anything else — not a controller-sent
+   * frame, not a relay `pong`, not a local timer, not `robot` presence. */
+  | { readonly kind: 'device-activity'; readonly at: number }
+  /** Round-trip time to the relay/Cloudflare edge itself (ping answered by
+   * the relay, never touching the device) — named explicitly (not just
+   * "rtt") to stay distinct from the device-round-trip metrics below. */
+  | { readonly kind: 'relay-rtt'; readonly ms: number }
+  /** browser -> relay -> device -> relay -> browser, for one accepted and
+   * applied `control` frame (see `ControlAck` in protocol.ts). Never
+   * fabricated for a frame the device rejected (wrong session, stale/
+   * duplicate seq) — those never receive one. */
+  | { readonly kind: 'control-rtt'; readonly ms: number }
+  /** Same round trip as 'control-rtt', specifically for an emergency-stop
+   * (see `EmergencyStopAck`) — kept distinct since it correlates by
+   * `sentAt` rather than session+seq and is operationally the metric that
+   * matters most for safety review. */
+  | { readonly kind: 'estop-rtt'; readonly ms: number }
   | { readonly kind: 'counters'; readonly data: Counters }
   | { readonly kind: 'alert'; readonly level: AlertLevel; readonly text: string }
   /** The relay rejected the controller credential (WS close 4003
