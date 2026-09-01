@@ -67,6 +67,8 @@ rovelink/
 ├── web/                  @rovelink/web — Vite + TypeScript + Tailwind control dashboard
 ├── relay/                @rovelink/relay — Cloudflare Worker + Durable Object (control)
 ├── video-relay/          @rovelink/video-relay — Cloudflare Worker + Durable Object (video)
+├── robot-sim/            @rovelink/robot-sim — desktop robot simulator (no hardware, see docs/demo.md)
+├── demo/                 @rovelink/demo — `pnpm dev:demo` orchestrator (see docs/demo.md)
 ├── firmware/             ESP32 sketch (WiFi + WSS + control logic)
 ├── docs/                 Architecture, protocol, auth, and safety documentation — see docs/README.md
 ├── README.md
@@ -76,6 +78,29 @@ rovelink/
 ├── pnpm-workspace.yaml
 └── package.json
 ```
+
+## Try RoveLink without hardware
+
+No ESP32, ESP32-CAM, or DualSense required — this runs the real control and
+video protocols end to end against a desktop robot simulator and a
+simulated camera.
+
+```bash
+pnpm install
+pnpm dev:demo
+```
+
+1. The terminal prints a temporary **Demo controller key**
+2. Open the printed local Web URL
+3. Enter that key into the normal login form
+4. The simulated robot appears **Online**
+5. The simulated camera appears **Live**
+6. Drive it with keyboard (WASD/arrows) or a gamepad if one is attached
+
+Press `Ctrl+C` to stop — every process it started is cleaned up, including
+the ephemeral secrets it generated. See
+[docs/demo.md](docs/demo.md) for what's real vs. simulated, the robot
+simulator's fidelity boundary, and artificial-latency/chaos options.
 
 ## Quick Start
 
@@ -133,6 +158,7 @@ configuration, TLS, and hardware modes.
 pnpm install        # install all workspace dependencies
 pnpm dev            # web dashboard at http://localhost:5173
 pnpm dev:relay      # relay at http://localhost:8787
+pnpm dev:demo       # full hardwareless stack — see docs/demo.md
 pnpm check          # format + lint + typecheck + tests
 pnpm build          # build all packages
 ```

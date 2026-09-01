@@ -7,23 +7,24 @@ package.
 
 ## Design and protocol
 
-| Doc                                       | Covers                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------ |
-| [architecture.md](architecture.md)        | Components, how they fit together, the connection lifecycle             |
-| [protocol.md](protocol.md)                | Control wire protocol (browser ↔ relay ↔ ESP32): every message, close codes |
-| [video-protocol.md](video-protocol.md)    | Video wire protocol (camera ↔ video relay ↔ browser): frame shape, flow control |
-| [authentication.md](authentication.md)    | Every secret, the login flow, the video ticket handoff, close-code reference |
-| [safety.md](safety.md)                    | Physical/motor safety: armed state, e-stop, TTL watchdog, link loss     |
+| Doc                                    | Covers                                                                                          |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [architecture.md](architecture.md)     | Components, how they fit together, the connection lifecycle                                     |
+| [protocol.md](protocol.md)             | Control wire protocol (browser ↔ relay ↔ ESP32): every message, close codes                     |
+| [video-protocol.md](video-protocol.md) | Video wire protocol (camera ↔ video relay ↔ browser): frame shape, flow control                 |
+| [authentication.md](authentication.md) | Every secret, the login flow, the video ticket handoff, close-code reference                    |
+| [safety.md](safety.md)                 | Physical/motor safety: armed state, e-stop, TTL watchdog, link loss                             |
+| [demo.md](demo.md)                     | Hardwareless demo (`pnpm dev:demo`): what's real vs. simulated, robot/camera simulator fidelity |
 
 ## Setup and process
 
-| Doc                              | Covers                                                    |
-| ---------------------------------- | ------------------------------------------------------------ |
-| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup, checks to run before submitting, code style |
-| [../SECURITY.md](../SECURITY.md)         | Vulnerability reporting, security-relevant scope        |
-| [../firmware/README.md](../firmware/README.md) | ESP32 firmware: compiling, hardware simulation, WiFi/relay config |
-| [../relay/README.md](../relay/README.md)       | Control relay: local dev, deployment                     |
-| [../video-relay/README.md](../video-relay/README.md) | Video relay: local dev, deployment, testing without a camera |
+| Doc                                                  | Covers                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------- |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md)             | Dev setup, checks to run before submitting, code style            |
+| [../SECURITY.md](../SECURITY.md)                     | Vulnerability reporting, security-relevant scope                  |
+| [../firmware/README.md](../firmware/README.md)       | ESP32 firmware: compiling, hardware simulation, WiFi/relay config |
+| [../relay/README.md](../relay/README.md)             | Control relay: local dev, deployment                              |
+| [../video-relay/README.md](../video-relay/README.md) | Video relay: local dev, deployment, testing without a camera      |
 
 ## Reading order for a new contributor
 
