@@ -164,6 +164,9 @@ void applyControlFrame(long seq, unsigned long sentAt, unsigned long ttlMs,
   if (!armed)
   {
     enterSafeState("disarmed");
+    // Applied (the disarmed state IS the resulting logical control state
+    // for this frame) — ack it, same as the armed/driving path below.
+    transportSendControlAck(seq, sessionId);
     return;
   }
 
@@ -175,6 +178,10 @@ void applyControlFrame(long seq, unsigned long sentAt, unsigned long ttlMs,
   applyMotors(currentState.throttle, currentState.steering);
   hwApplyGripper(currentState.gripper);
   hwLinkLed(true);
+  // Sent only here, after MOTOR SIM/control-state application above — never
+  // for a frame that returned early (wrong session, stale/duplicate seq, or
+  // armed=true rejected before the session's disarmed baseline).
+  transportSendControlAck(seq, sessionId);
 }
 
 // Link watchdog: if frames stop arriving, the car stops on its own. This prevents
@@ -235,9 +242,15 @@ void onControlReceived(const ControlFrameIn &frame)
 // of which session is active or in flight (see onSessionChanged /
 // applyControlFrame) — a safety action must never be filterable by ordering
 // logic that exists only to arbitrate normal driving frames.
-void onEmergencyStopReceived()
+void onEmergencyStopReceived(int64_t sentAt)
 {
   enterSafeState("emergency");
+  // Sent immediately after the stop has been applied (motors already at
+  // zero by the time this runs — enterSafeState() is synchronous). Echoes
+  // the triggering message's own sentAt: emergency-stop is deliberately
+  // session/seq-independent, so it has no controlSessionId/seq to key off
+  // the way a regular control.ack does.
+  transportSendEmergencyStopAck(sentAt);
 }
 
 // Minimal protocol telemetry at a moderate rate (enough for the dashboard to

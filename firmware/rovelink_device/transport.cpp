@@ -106,15 +106,26 @@ static void handleText(uint8_t *payload, size_t length)
 {
   JsonDocument doc;
   if (deserializeJson(doc, payload, length) != DeserializationError::Ok)
+  {
+    Serial.println("[RX] malformed JSON");
     return;
+  }
 
   JsonVariantConst m = doc.as<JsonVariantConst>();
   if (!m["v"].is<int>() || m["v"].as<int>() != PROTOCOL_VERSION)
+  {
+    Serial.println("[RX] bad/missing v");
     return;
+  }
   if (!m["type"].is<const char *>())
+  {
+    Serial.println("[RX] missing type");
     return;
+  }
 
   const char *type = m["type"];
+  Serial.print("[RX] type=");
+  Serial.println(type);
 
   if (strcmp(type, "control") == 0)
   {
@@ -148,9 +159,15 @@ static void handleText(uint8_t *payload, size_t length)
 
   if (strcmp(type, "emergency-stop") == 0)
   {
+    // Best-effort: a missing/malformed sentAt (should not happen from a
+    // real relay/browser) still lets the emergency stop itself proceed —
+    // safety is never gated on this value — it just means the eventual
+    // ack echoes 0 and the browser's RTT tracker will fail to correlate it
+    // (treated the same as any other unknown ack).
+    int64_t sentAt = m["sentAt"].is<int64_t>() ? m["sentAt"].as<int64_t>() : 0;
     Serial.println("[RX] emergency-stop");
     if (cbEmergencyStop != nullptr)
-      cbEmergencyStop();
+      cbEmergencyStop(sentAt);
     return;
   }
 
@@ -326,4 +343,40 @@ void transportSendTelemetry(int rssi, bool armed, float throttle, float steering
   String output;
   serializeJson(doc, output);
   wsClient.sendTXT(output);
+}
+
+void transportSendControlAck(long seq, const char *sessionId)
+{
+  if (!transportConnected())
+    return;
+
+  JsonDocument doc;
+  doc["v"] = PROTOCOL_VERSION;
+  doc["type"] = "control.ack";
+  doc["controlSessionId"] = sessionId;
+  doc["seq"] = seq;
+
+  String output;
+  serializeJson(doc, output);
+  wsClient.sendTXT(output);
+
+  Serial.print("[TX] control.ack seq=");
+  Serial.println(seq);
+}
+
+void transportSendEmergencyStopAck(int64_t sentAt)
+{
+  if (!transportConnected())
+    return;
+
+  JsonDocument doc;
+  doc["v"] = PROTOCOL_VERSION;
+  doc["type"] = "emergency-stop.ack";
+  doc["sentAt"] = sentAt;
+
+  String output;
+  serializeJson(doc, output);
+  wsClient.sendTXT(output);
+
+  Serial.println("[TX] emergency-stop.ack");
 }

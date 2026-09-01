@@ -44,7 +44,16 @@ struct ControlFrameIn
 };
 
 typedef void (*TransportControlCb)(const ControlFrameIn &frame);
-typedef void (*TransportEmergencyCb)();
+// `sentAt` is the browser's own clock (JS `Date.now()`, epoch milliseconds)
+// echoed back unmodified in the ack below — the device never interprets or
+// compares it (its own clock is not synced with the browser's; see the
+// `sentAt`/`ttlMs` note in applyControlFrame()). `int64_t` rather than
+// `long`/`unsigned long` (32-bit on this platform, would truncate an
+// epoch-millisecond value) or `double` (round-trips exactly only up to
+// 2^53, and ArduinoJson's default double serialization can lose precision
+// well before that) — a JS integer timestamp round-trips exactly through
+// int64_t with no such risk.
+typedef void (*TransportEmergencyCb)(int64_t sentAt);
 // Relay-authored `controller.session` message: the ONLY thing that may
 // change which control session is currently active on this device. See
 // protocol.ts ControlSession and room.ts #sendControlSession.
@@ -77,3 +86,15 @@ const char *transportStatusText();
 // both happened to reach the same number.
 void transportSendTelemetry(int rssi, bool armed, float throttle, float steering, long ackSeq,
                             const char *ackSessionId);
+
+// Control/E-stop round-trip observability (Problem 8A). Both are sent ONLY
+// from the point in rovelink_device.ino where the corresponding frame has
+// already passed session/seq/safety gating and its resulting logical
+// control state has been applied — never for a rejected frame (wrong
+// session, stale/duplicate seq, invalid, or an armed=true frame arriving
+// before a fresh session's disarmed baseline is established). An ACK is
+// proof of application, not proof of receipt. Both are no-ops (silently
+// dropped, like transportSendTelemetry) if not currently connected —
+// observability must never block or retry against the control path.
+void transportSendControlAck(long seq, const char *sessionId);
+void transportSendEmergencyStopAck(int64_t sentAt);
