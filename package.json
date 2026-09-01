@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "pnpm --filter @rovelink/web dev",
     "dev:relay": "pnpm --filter @rovelink/relay dev",
+    "dev:demo": "pnpm --filter @rovelink/demo start",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "lint": "oxlint",

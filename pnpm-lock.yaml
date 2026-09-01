@@ -125,6 +125,12 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  demo:
+    devDependencies:
+      '@types/node':
+        specifier: 26.4.0
+        version: 26.4.0
+
   protocol:
     devDependencies:
       '@types/node':
@@ -152,6 +158,22 @@ importers:
       wrangler:
         specifier: 4.127.1
         version: 4.127.1(@cloudflare/workers-types@5.20260829.1)
+
+  robot-sim:
+    dependencies:
+      '@rovelink/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ws:
+        specifier: 8.18.1
+        version: 8.18.1
+    devDependencies:
+      '@types/node':
+        specifier: 26.4.0
+        version: 26.4.0
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   video-relay:
     dependencies:
