@@ -11,6 +11,9 @@ open outbound connections to the relay. The relay routes messages between them.
 ### Web Dashboard (`web/`)
 
 - Vite + TypeScript + Tailwind CSS, vanilla DOM (no framework)
+- Login gate: the driving UI is not mounted until the relay confirms
+  authentication (`auth/handshake.ts`) — see
+  [authentication.md](authentication.md#operator-login-web-dashboard)
 - Gamepad API for physical controllers
 - Keyboard fallback (WASD / arrows)
 - Touch controls for mobile
@@ -35,7 +38,8 @@ open outbound connections to the relay. The relay routes messages between them.
   viewers
 - Publishers authenticate with a shared secret; viewers present a
   short-lived signed ticket minted by the control relay (see
-  [protocol.md](protocol.md))
+  [authentication.md](authentication.md))
+- Wire protocol: [video-protocol.md](video-protocol.md)
 
 ### Protocol (`protocol/`)
 
@@ -59,20 +63,31 @@ open outbound connections to the relay. The relay routes messages between them.
 
 ```text
 1. ESP32 boots → WiFi connects → Internet probe succeeds
-2. ESP32 opens WSS to relay → sends device.register
-3. Browser opens WSS to relay → sends controller.register
-4. Relay publishes room (deviceOnline: true, controllerOnline: true)
-5. Browser sends ControlFrame → relay forwards to ESP32
+2. ESP32 opens WSS to relay → sends device.register (DEVICE_SECRET)
+3. Operator types their key into the login screen → browser opens WSS to
+   relay → sends controller.register (CONTROLLER_SECRET)
+4. Relay verifies both tokens, mints a controlSessionId, sends
+   controller.session to the device and the controller, and publishes room
+   (deviceOnline: true, controllerOnline: true) — only now does the browser
+   mount the driving UI
+5. Browser sends ControlFrame → relay stamps controlSessionId → forwards to
+   ESP32
 6. ESP32 sends Telemetry → relay forwards to browser
 7. On controller disconnect → relay sends emergency-stop to device
 8. On any link loss → both sides fall back to safe state
+9. (Optional) Browser requests a video ticket from the control relay, then
+   connects to the separate video relay to view the camera feed — see
+   authentication.md
 ```
+
+See [authentication.md](authentication.md) for the full credential model and
+close-code reference.
 
 ## Design Principles
 
 - **Outbound only**: no port forwarding, no public IPs, no NAT traversal
 - **Latest state wins**: `seq` field discards stale frames
-- **TTL watchdog**: frames older than 250 ms are ignored
+- **TTL watchdog**: frames older than `ttlMs` (default 500 ms) are ignored
 - **Safe state by default**: disconnection = motors off
 - **Shared logic**: `differentialMix()` and `ControlState` are defined once
   in `protocol/` and used identically by web and firmware

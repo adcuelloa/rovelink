@@ -9,8 +9,9 @@ messages with unrecognized versions.
 
 This document covers the control protocol only (browser ↔ relay ↔ ESP32).
 The video relay (publisher/viewer streaming and ticket-based auth) is a
-separate wire protocol — see `protocol/src/video.ts` and
-`protocol/src/video-ticket.ts`.
+separate wire protocol — see [video-protocol.md](video-protocol.md). For how
+`token` values are provisioned and verified, and the full close-code
+reference, see [authentication.md](authentication.md).
 
 ## Messages
 
@@ -49,6 +50,22 @@ Sent by the browser after connecting to the relay.
 `token` is verified against the relay's `CONTROLLER_SECRET` the same way as
 `device.register`.
 
+### controller.session
+
+Relay-authored only — sent to a device and to the controller itself the
+moment that controller's registration becomes authoritative. Never
+established or changed by a `control` frame; this is what stops a delayed
+frame from a previous session from ever rolling the device's active session
+backward.
+
+```json
+{ "v": 1, "type": "controller.session", "robotId": "robot-01", "sessionId": "..." }
+```
+
+The relay stamps `sessionId` onto every `control` frame it forwards to the
+device as `controlSessionId` (see below) — the browser never sets this
+itself.
+
 ### control
 
 Control frame from browser to robot. Carries the current driving state.
@@ -59,7 +76,7 @@ Control frame from browser to robot. Carries the current driving state.
   "type": "control",
   "seq": 42,
   "sentAt": 1700000000000,
-  "ttlMs": 250,
+  "ttlMs": 500,
   "throttle": 0.75,
   "steering": -0.25,
   "gripper": "idle",
@@ -67,6 +84,9 @@ Control frame from browser to robot. Carries the current driving state.
 }
 ```
 
+- `controlSessionId`: which control session this frame belongs to (see
+  `controller.session` above). Absent on the browser→relay leg, where it
+  doesn't exist yet; the relay adds it before forwarding to the device.
 - `seq`: monotonically increasing; only the highest `seq` is obeyed
 - `sentAt`: timestamp in milliseconds
 - `ttlMs`: time-to-live; frame is ignored if `now - sentAt > ttlMs`
@@ -85,12 +105,17 @@ Periodic status from the robot to the browser (~3 Hz).
   "type": "telemetry",
   "sentAt": 1700000000000,
   "ackSeq": 42,
+  "ackSessionId": "...",
   "rssi": -55,
   "throttle": 0.75,
   "steering": -0.25,
   "armed": true
 }
 ```
+
+`ackSessionId` names which control session `ackSeq` belongs to — without it,
+`ackSeq` from two different sessions is ambiguous, since both can
+legitimately be small numbers.
 
 ### ping / pong
 
@@ -129,10 +154,45 @@ Published by the relay to both controller and device when presence changes.
 }
 ```
 
+### controller.videoTicket.request / controller.videoTicket
+
+Controller → relay → controller: the browser asks the control relay to mint
+a short-lived video viewer ticket, so it can connect to the (separate) video
+relay. See [authentication.md](authentication.md#video-ticket-based-viewer-authorization)
+for the full flow.
+
+```json
+{ "v": 1, "type": "controller.videoTicket.request" }
+```
+
+```json
+{
+  "v": 1,
+  "type": "controller.videoTicket",
+  "robotId": "robot-01",
+  "ticket": "<signed-ticket>",
+  "expiresAt": 1700000045000
+}
+```
+
+The request carries no credential and no `robotId`: authority comes entirely
+from the requesting socket already being a registered, authenticated
+controller, and the ticket is minted for exactly the robot that socket is
+already authenticated to. `ticket` is opaque to the browser — it is handed
+unchanged to the video relay's `viewer.register` (see
+[video-protocol.md](video-protocol.md)).
+
+## Close codes
+
+Every registration/auth failure closes the WebSocket with a private
+application close code instead of a generic disconnect — see
+[authentication.md](authentication.md#close-codes) for the full table
+(`OCCUPIED`, `DEVICE_REPLACED`, `AUTH_FAILED`, `REGISTRATION_TIMEOUT`).
+
 ## Properties
 
 - **Latest state wins**: only the frame with the highest `seq` is applied
-- **TTL**: frames older than `ttlMs` (default 250 ms) are discarded
+- **TTL**: frames older than `ttlMs` (default 500 ms, `CONTROL_TTL_MS`) are discarded
 - **No command queue**: the robot always applies the most recent state
 - **Emergency stop**: immediate, bypasses normal control flow
 - **Link loss**: disconnection triggers safe state on all sides

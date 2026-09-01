@@ -28,6 +28,10 @@ Please include:
 - Potential impact
 - Suggested fix (if any)
 
+See [docs/authentication.md](docs/authentication.md) for the full
+credential model (every secret, the operator login flow, the video ticket
+handoff) and close-code reference.
+
 ## Current Security Design
 
 RoveLink includes several safety mechanisms by design:

@@ -1,0 +1,17 @@
+# Local `wrangler dev` secrets for @rovelink/relay (Cloudflare Workers reads
+# these from `.dev.vars`, never from `wrangler.jsonc` — see the "secrets"
+# comment there).
+#
+# Copy to `.dev.vars` (gitignored) and fill in real values:
+#
+#   cp relay/.dev.vars.example relay/.dev.vars
+#
+# Any value works for local dev as long as firmware/rovelink_device's
+# device_secrets.h, the dev CLI tools' CONTROLLER_SECRET env var, and this
+# file agree. VIDEO_TICKET_SECRET must be byte-for-byte identical to the
+# VIDEO_TICKET_SECRET in video-relay/.dev.vars — it is how the two Workers
+# agree a ticket minted here is genuine (see docs/authentication.md).
+
+DEVICE_SECRET=dev-device-secret
+CONTROLLER_SECRET=dev-controller-secret
+VIDEO_TICKET_SECRET=dev-video-ticket-secret

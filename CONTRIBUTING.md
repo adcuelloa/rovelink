@@ -10,6 +10,19 @@ pnpm install
 
 Requires Node.js >= 24.20.0 and pnpm 12.
 
+Running the relay or video relay locally (`pnpm dev:relay`, or
+`pnpm --filter @rovelink/video-relay dev`) requires `.dev.vars` in that
+package, since both now enforce authentication:
+
+```bash
+cp relay/.dev.vars.example relay/.dev.vars
+cp video-relay/.dev.vars.example video-relay/.dev.vars
+# edit both — VIDEO_TICKET_SECRET must be identical in both files
+```
+
+See [docs/authentication.md](docs/authentication.md) for what each secret
+proves.
+
 ## Before submitting
 
 1. Run the full check:
@@ -44,6 +57,7 @@ pnpm dev:relay      # relay at http://localhost:8787
 ## What not to commit
 
 - `.env.local`, `.env` — use `.env.example` as a template.
+- `.dev.vars` (in `relay/` or `video-relay/`) — use `.dev.vars.example` as a template.
 - `wifi_secrets.h`, `device_secrets.h` — use the `.example.h` files.
 - `node_modules/`, `dist/`, `.wrangler/` — already gitignored.
 

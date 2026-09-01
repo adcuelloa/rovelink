@@ -50,7 +50,7 @@ Gamepad / Keyboard / Touch
 - Touch controls for mobile
 - Analog throttle and steering with deadzone
 - Latest-state-wins (no command queue)
-- TTL-based link watchdog (250 ms)
+- TTL-based link watchdog (500 ms)
 - Emergency stop (desarms + zeroes all axes immediately)
 - Hardware simulation mode for ESP32-S3 development boards
 - Cloudflare Durable Objects for relay rooms
@@ -68,7 +68,7 @@ rovelink/
 ├── relay/                @rovelink/relay — Cloudflare Worker + Durable Object (control)
 ├── video-relay/          @rovelink/video-relay — Cloudflare Worker + Durable Object (video)
 ├── firmware/             ESP32 sketch (WiFi + WSS + control logic)
-├── docs/                 Architecture, protocol, and safety documentation
+├── docs/                 Architecture, protocol, auth, and safety documentation — see docs/README.md
 ├── README.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
@@ -160,6 +160,20 @@ pnpm build          # build all packages
 Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI. Without
 `VITE_VIDEO_RELAY_URL` the video panel is disabled rather than failing.
 
+The relays themselves are configured with **secrets**, not `VITE_*`
+variables (`DEVICE_SECRET`, `CONTROLLER_SECRET`, `VIDEO_PUBLISHER_SECRET`,
+`VIDEO_TICKET_SECRET`) — see
+[docs/authentication.md](docs/authentication.md) for what each one proves
+and [relay/README.md](relay/README.md) /
+[video-relay/README.md](video-relay/README.md) for how to set them, both
+locally (`.dev.vars`) and on a deployed Worker (`wrangler secret put`).
+
+## Documentation
+
+See [docs/README.md](docs/README.md) for the full documentation index
+(architecture, wire protocols, authentication, safety) and a suggested
+reading order for new contributors.
+
 ## Current Status
 
 **Status: experimental / pre-1.0**
@@ -168,11 +182,17 @@ Without `VITE_RELAY_URL` the WebSocket option is disabled in the UI. Without
 - Protocol, codec, and differential mix: defined and tested
 - Relay (Worker + Durable Object): tested with `wrangler dev`
 - WebSocket transport (browser ↔ relay): tested end-to-end in local dev
+- Authentication (device/controller shared-secret, video viewer tickets):
+  implemented and tested
+- Video relay (Worker + Durable Object) and live video viewer: implemented,
+  tested with `wrangler dev` and the `video-relay/src/dev/*-cli.ts` tools;
+  no camera firmware yet (see Roadmap)
 - ESP32 firmware: compiled but not yet validated on physical hardware
 
 ## Roadmap
 
 - Physical ESP32 WSS validation with deployed Worker
+- ESP32-CAM firmware for the video publisher role (only a dev CLI exists today)
 - DualSense-specific button profile
 - Real differential-drive hardware testing
 - Wi-Fi provisioning (no manual SSID entry)

@@ -25,7 +25,8 @@ Emergency stop can be triggered by:
 
 ## TTL Watchdog
 
-Each control frame includes a `ttlMs` field (default 250 ms). If no valid
+Each control frame includes a `ttlMs` field (default 500 ms, see
+`CONTROL_TTL_MS` in `protocol/src/protocol.ts`). If no valid
 frame arrives within that window, the firmware enters safe state. This
 prevents the robot from continuing to move if the connection is lost.
 

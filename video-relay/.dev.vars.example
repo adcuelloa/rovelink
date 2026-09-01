@@ -1,0 +1,18 @@
+# Local `wrangler dev` secrets for @rovelink/video-relay (Cloudflare Workers
+# reads these from `.dev.vars`, never from `wrangler.jsonc` — see the
+# "secrets" comment there).
+#
+# Copy to `.dev.vars` (gitignored) and fill in real values:
+#
+#   cp video-relay/.dev.vars.example video-relay/.dev.vars
+#
+# VIDEO_TICKET_SECRET must be byte-for-byte identical to the
+# VIDEO_TICKET_SECRET in relay/.dev.vars — it is the shared secret the two
+# Workers use to agree a ticket the control relay minted is genuine. Only
+# the two relays ever see this value; it is never sent to, or knowable by,
+# the browser (see docs/authentication.md). VIDEO_PUBLISHER_SECRET is
+# whatever the publisher (a real camera or video-relay/src/dev/publisher-cli.ts)
+# sends as its `token`.
+
+VIDEO_PUBLISHER_SECRET=dev-video-publisher-secret
+VIDEO_TICKET_SECRET=dev-video-ticket-secret
