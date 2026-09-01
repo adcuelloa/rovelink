@@ -561,6 +561,302 @@ describe('RobotRoom: Problem 2 stale-lease behavior (regression)', () => {
   });
 });
 
+describe('RobotRoom: stale device is demoted logically, not by waiting on close (Problem 8A)', () => {
+  it('demotes a stale registered device in the sweep itself, without needing its close to complete', async () => {
+    const robotId = 'room-8a-device-immediate-demote';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    await settle();
+    await markStale(robotId, 'device');
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    const ran = await runDurableObjectAlarm(stub);
+    expect(ran).toBe(true);
+    // Deliberately not waiting on the device socket's own close event: the
+    // assertion is that demotion does not depend on it.
+    expect(await isRegistered(robotId, 'device')).toBe(false);
+  });
+
+  it('broadcasts deviceOnline:false from the sweep itself, without waiting for webSocketClose', async () => {
+    const robotId = 'room-8a-device-announce-in-sweep';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await waitForMessage(controller!, 'room', (room) => room.deviceOnline);
+    await markStale(robotId, 'device');
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    const offline = waitForMessage(controller!, 'room', (room) => !room.deviceOnline);
+    await runDurableObjectAlarm(stub);
+    // No waitForClose(device!) anywhere in this test: the room broadcast is
+    // asserted to arrive from the sweep alone.
+    await expect(offline).resolves.toMatchObject({ deviceOnline: false });
+  });
+
+  it('the demoted attachment reports unregistered even if the socket object is still enumerable', async () => {
+    const robotId = 'room-8a-device-zombie-attachment';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    await settle();
+    await markStale(robotId, 'device');
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub);
+
+    // Whether or not the physical socket has actually finished closing by
+    // this point (a truly dead peer can linger far longer than this test
+    // environment ever reproduces — see alarm()'s doc comment), nothing
+    // still enumerable under 'device' may claim to be a registered device.
+    const stillClaimingRegistered = await runInDurableObject(
+      stub,
+      (_instance: RobotRoom, state: DurableObjectState) =>
+        state.getWebSockets('device').some((ws) => ws.deserializeAttachment()?.registered === true),
+    );
+    expect(stillClaimingRegistered).toBe(false);
+    expect(device).not.toBeNull();
+  });
+
+  it('a second sweep over an already-demoted stale device does not re-announce or re-log an eviction', async () => {
+    const robotId = 'room-8a-device-idempotent-sweep';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    await settle();
+    await markStale(robotId, 'device');
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub); // first sweep: demotes + announces
+
+    // A controller registering only AFTER the first sweep already observes
+    // the corrected state in its own registration-time announce.
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await waitForMessage(controller!, 'room', (room) => !room.deviceOnline);
+
+    // The single close() the first sweep requested still completes exactly
+    // once, firing webSocketClose() and its own (harmless, already-current)
+    // re-announce — deterministically forced here rather than raced against
+    // the real socket's async close, so it can be drained before asserting
+    // silence below.
+    await runInDurableObject(stub, (instance: RobotRoom) => {
+      instance.webSocketClose(device!, CLOSE_CODE.OCCUPIED, 'stale-heartbeat-timeout');
+    });
+    await settle();
+
+    const controllerReceivesNothingElse = neverReceives(controller!);
+    await runDurableObjectAlarm(stub); // second sweep over the same socket
+    await runDurableObjectAlarm(stub); // third, for good measure
+    await settle();
+    expect(controllerReceivesNothingElse()).toBe(false);
+  });
+
+  it('a belated webSocketClose on an already-demoted device does not knock a new replacement device offline', async () => {
+    const robotId = 'room-8a-device-belated-close';
+    const { ws: oldDevice } = await open(`/robot/${robotId}/device`);
+    registerDevice(oldDevice!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    await markStale(robotId, 'device');
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub);
+    await waitForMessage(controller!, 'room', (room) => !room.deviceOnline);
+
+    const { ws: newDevice } = await open(`/robot/${robotId}/device`);
+    registerDevice(newDevice!, robotId, VALID_DEVICE_TOKEN);
+    await waitForMessage(controller!, 'room', (room) => room.deviceOnline);
+
+    // The old device's close handler finally runs, long after being
+    // demoted and long after a replacement already took over.
+    await runInDurableObject(stub, (instance: RobotRoom) => {
+      instance.webSocketClose(oldDevice!, CLOSE_CODE.OCCUPIED, 'stale-heartbeat-timeout');
+    });
+    await settle();
+
+    expect(await isRegistered(robotId, 'device')).toBe(true);
+  });
+});
+
+describe('RobotRoom: controller ping as a presence heartbeat (Problem 8A)', () => {
+  it('a ping from a registered controller refreshes its lastSeenAt', async () => {
+    const robotId = 'room-8a-ping-refresh-ctrl';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    // Right up against, but not past, the controller stale bound.
+    await markSilentFor(robotId, 'controller', 89_000);
+    send(controller!, { v: PROTOCOL_VERSION, type: 'ping', id: 1, sentAt: Date.now() });
+    await waitForMessage(controller!, 'pong');
+
+    // If the ping had not refreshed lastSeenAt, this socket would already
+    // be past STALE_MS.controller and the sweep below would evict it.
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub);
+    await settle();
+    expect(await isRegistered(robotId, 'controller')).toBe(true);
+  });
+
+  it('repeated pings keep an idle, disarmed controller present well past the old 90s failure point', async () => {
+    const robotId = 'room-8a-ping-idle-ctrl-alive';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    for (let i = 0; i < 3; i++) {
+      await markSilentFor(robotId, 'controller', 89_000);
+      send(controller!, { v: PROTOCOL_VERSION, type: 'ping', id: i, sentAt: Date.now() });
+      await waitForMessage(controller!, 'pong', (pong) => pong.id === i);
+      await runDurableObjectAlarm(stub);
+    }
+    await settle();
+    // Three simulated near-90s gaps, each bridged by a ping: no control or
+    // heartbeat frame was ever sent, only presence pings.
+    expect(await isRegistered(robotId, 'controller')).toBe(true);
+  });
+
+  it("a controller ping does not refresh the device's lastSeenAt", async () => {
+    const robotId = 'room-8a-ping-no-touch-device';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    await markStale(robotId, 'device');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'ping', id: 1, sentAt: Date.now() });
+    await waitForMessage(controller!, 'pong');
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub);
+    await settle();
+    // The controller's own ping must not have rescued the stale device.
+    expect(await isRegistered(robotId, 'device')).toBe(false);
+  });
+
+  it('a ping from a pending, unregistered controller neither registers it nor rescues it from the registration timeout', async () => {
+    const robotId = 'room-8a-ping-pending-unreg';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    // Deliberately never registers.
+    send(controller!, { v: PROTOCOL_VERSION, type: 'ping', id: 1, sentAt: Date.now() });
+    await waitForMessage(controller!, 'pong');
+    expect(await isRegistered(robotId, 'controller')).toBe(false);
+
+    await markSilentFor(robotId, 'controller', 6000); // past REGISTER_TIMEOUT_MS
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    const closed = waitForClose(controller!);
+    await runDurableObjectAlarm(stub);
+    await expect(closed).resolves.toMatchObject({ code: CLOSE_CODE.REGISTRATION_TIMEOUT });
+  });
+
+  it('a pong echoes the same id and sentAt the ping carried', async () => {
+    const robotId = 'room-8a-ping-pong-matches';
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const sentAt = Date.now();
+    const pong = waitForMessage(controller!, 'pong');
+    send(controller!, { v: PROTOCOL_VERSION, type: 'ping', id: 42, sentAt });
+    await expect(pong).resolves.toMatchObject({ id: 42, sentAt });
+  });
+});
+
+describe('RobotRoom: control/E-stop ack forwarding (Problem 8A)', () => {
+  it('forwards a control.ack from device to controller unchanged', async () => {
+    const robotId = 'room-8a-ack-control-forward';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ack = waitForMessage(controller!, 'control.ack');
+    send(device!, {
+      v: PROTOCOL_VERSION,
+      type: 'control.ack',
+      controlSessionId: 'session-a',
+      seq: 5,
+    });
+    await expect(ack).resolves.toMatchObject({ controlSessionId: 'session-a', seq: 5 });
+  });
+
+  it('forwards an emergency-stop.ack from device to controller unchanged', async () => {
+    const robotId = 'room-8a-ack-estop-forward';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const ack = waitForMessage(controller!, 'emergency-stop.ack');
+    send(device!, { v: PROTOCOL_VERSION, type: 'emergency-stop.ack', sentAt: 1700000000000 });
+    await expect(ack).resolves.toMatchObject({ sentAt: 1700000000000 });
+  });
+
+  it('a control.ack from a device counts as freshness evidence, keeping it from going stale', async () => {
+    const robotId = 'room-8a-ack-refreshes-device';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    await settle();
+
+    await markSilentFor(robotId, 'device', 5900); // just under STALE_MS.device (6000ms)
+    send(device!, {
+      v: PROTOCOL_VERSION,
+      type: 'control.ack',
+      controlSessionId: 'session-a',
+      seq: 1,
+    });
+
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(robotId));
+    await runDurableObjectAlarm(stub);
+    await settle();
+    expect(await isRegistered(robotId, 'device')).toBe(true);
+  });
+
+  it('a control.ack sent by a controller (wrong role) is not forwarded anywhere', async () => {
+    const robotId = 'room-8a-ack-wrong-role';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    registerDevice(device!, robotId, VALID_DEVICE_TOKEN);
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const deviceNeverReceives = neverReceives(device!);
+    const controllerNeverReceivesAgain = neverReceives(controller!);
+    send(controller!, {
+      v: PROTOCOL_VERSION,
+      type: 'control.ack',
+      controlSessionId: 'session-a',
+      seq: 1,
+    });
+    await settle();
+    expect(deviceNeverReceives()).toBe(false);
+    expect(controllerNeverReceivesAgain()).toBe(false);
+  });
+
+  it('an ack from an unregistered device is never forwarded', async () => {
+    const robotId = 'room-8a-ack-unregistered-device';
+    const { ws: device } = await open(`/robot/${robotId}/device`);
+    // Deliberately never registers.
+    const { ws: controller } = await open(`/robot/${robotId}/controller`);
+    registerController(controller!, robotId, VALID_CONTROLLER_TOKEN);
+    await settle();
+
+    const controllerNeverReceives = neverReceives(controller!);
+    send(device!, {
+      v: PROTOCOL_VERSION,
+      type: 'control.ack',
+      controlSessionId: 'session-a',
+      seq: 1,
+    });
+    await settle();
+    expect(controllerNeverReceives()).toBe(false);
+  });
+});
+
 describe('RobotRoom: session-scoped sequencing (Problem 4)', () => {
   it("sends controller.session to the device before that controller's first control frame", async () => {
     const robotId = 'room-session-order';

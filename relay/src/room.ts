@@ -87,6 +87,14 @@ interface Attachment {
    * which session is authoritative — the device itself never decides this
    * from a ControlFrame alone. */
   readonly controlSessionId?: string;
+  /** Set once the alarm sweep has asked the runtime to close this specific
+   * socket for staleness (see alarm()). A truly dead peer's `ws.close()`
+   * can take far longer than one sweep interval to actually complete (or
+   * may, in some runtimes, re-fire `webSocketClose()` on a second close()
+   * call rather than no-op) — this bound ensures the sweep only ever
+   * *asks* once per socket, instead of re-requesting a close (and thereby
+   * risking a duplicate #announceRoom) on every subsequent pass. */
+  readonly closeRequested?: boolean;
 }
 
 function readAttachment(ws: WebSocket): Attachment | null {
@@ -102,6 +110,7 @@ function readAttachment(ws: WebSocket): Attachment | null {
     lastSeenAt: typeof possible.lastSeenAt === 'number' ? possible.lastSeenAt : Date.now(),
     controlSessionId:
       typeof possible.controlSessionId === 'string' ? possible.controlSessionId : undefined,
+    closeRequested: possible.closeRequested === true,
   };
 }
 
@@ -166,6 +175,21 @@ export class RobotRoom implements DurableObject {
       // The pong is answered by the relay: it measures the RTT to the edge,
       // which is what decides whether the link is usable for driving. Not
       // gated on registration: it carries no control/telemetry.
+      //
+      // A ping from an already-registered controller ALSO counts as
+      // controller-originated liveness evidence, refreshing lastSeenAt the
+      // same as #touch does for any other message: rhythm.ts deliberately
+      // sends zero control/heartbeat frames while disarmed+idle (the
+      // correct steady-state optimization, not a bug), so without this a
+      // genuinely-present, idle operator would silently exceed
+      // STALE_MS.controller and get sweep-evicted every ~90s for doing
+      // nothing wrong. Device role is deliberately excluded: the firmware
+      // never sends `ping` today, and if it ever did, that would prove only
+      // that the RELAY is reachable, never that the physical device applied
+      // anything — device freshness must stay evidence-of-device-work only.
+      if (attachment.role === 'controller' && attachment.registered) {
+        this.#touch(ws, attachment);
+      }
       this.#send(ws, {
         v: PROTOCOL_VERSION,
         type: 'pong',
@@ -215,6 +239,15 @@ export class RobotRoom implements DurableObject {
       return;
     }
     if (message.type === 'telemetry') this.#forward('controller', message);
+    // control.ack / emergency-stop.ack (Problem 8A): forwarded exactly like
+    // telemetry — a device-originated message, so #touch above already
+    // counts it as device-freshness evidence, with no special-casing
+    // needed. The relay does not validate the ack's controlSessionId/seq
+    // against anything: it is pure pass-through observability the firmware
+    // already gated on its own session/seq/safety checks before sending.
+    if (message.type === 'control.ack' || message.type === 'emergency-stop.ack') {
+      this.#forward('controller', message);
+    }
   }
 
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
@@ -258,25 +291,69 @@ export class RobotRoom implements DurableObject {
    * `deviceOnline`/`controllerOnline` even when nobody ever attempts to
    * reconnect, and is also what bounds how long an unregistered socket may
    * sit idle (REGISTER_TIMEOUT_MS).
+   *
+   * A stale REGISTERED socket is demoted (and, the first time, announced)
+   * synchronously in this same pass, BEFORE `ws.close()` is even attempted —
+   * never as a side effect of `webSocketClose()` firing later. Measured live
+   * against a real ESP32 killed by abrupt power loss: with no TCP FIN/RST
+   * ever reaching the edge, `ws.close()` does not make the socket disappear
+   * from `getWebSockets()` or fire `webSocketClose()` for many seconds
+   * afterward (observed ~45s, and it kept reappearing across many
+   * consecutive sweeps in the meantime) — so `#getRegisteredSockets`, which
+   * every presence check and forward reads from, kept reporting the dead
+   * device as `registered: true` that whole time. Worse, ANY unrelated
+   * `#announceRoom` call in the meantime (e.g. a controller reconnecting)
+   * re-derived presence from that same stale attachment and re-broadcast
+   * `deviceOnline: true` — a dead device could appear to "come back online"
+   * indefinitely, not just briefly. Demoting here makes "stale" and "not
+   * counted in presence" the same instant, independent of whether the
+   * transport ever actually finishes closing.
    */
   async alarm(): Promise<void> {
     let anySockets = false;
+    let robotIdToAnnounce: string | null = null;
     for (const role of ['controller', 'device'] as const) {
       for (const ws of this.#getSockets(role)) {
         anySockets = true;
         if (!this.#isStale(ws)) continue;
         const attachment = readAttachment(ws);
-        const wasRegistered = attachment?.registered === true;
-        console.log(`[room] sweep-evict role=${role} registered=${wasRegistered}`);
+        if (attachment === null) continue;
+        // Idempotency: once a socket has already been through this branch
+        // once (`closeRequested`), a later sweep that still finds it
+        // enumerable (see the doc comment above) does nothing further —
+        // no re-demotion, no re-announce, and no second close() attempt
+        // (which, on at least one runtime observed, re-fires
+        // webSocketClose() rather than no-op, which would itself trigger a
+        // redundant #announceRoom).
+        if (attachment.closeRequested) continue;
+
+        const wasRegistered = attachment.registered;
         if (wasRegistered) {
-          this.#closeQuietly(ws, CLOSE_CODE.OCCUPIED, 'stale-heartbeat-timeout');
-        } else {
-          this.#closeQuietly(ws, CLOSE_CODE.REGISTRATION_TIMEOUT, 'registration-timeout');
+          robotIdToAnnounce = attachment.robotId;
+          console.log(`[room] sweep-evict role=${role} registered=true`);
         }
+        ws.serializeAttachment({
+          ...attachment,
+          registered: false,
+          closeRequested: true,
+        } satisfies Attachment);
+        this.#closeQuietly(
+          ws,
+          wasRegistered ? CLOSE_CODE.OCCUPIED : CLOSE_CODE.REGISTRATION_TIMEOUT,
+          wasRegistered ? 'stale-heartbeat-timeout' : 'registration-timeout',
+        );
       }
     }
-    // webSocketClose() (triggered by the close above) already re-announces
-    // presence for each evicted socket; nothing else to publish here.
+    // Announced here — not left to webSocketClose() — because that handler
+    // may not run for a long time on a truly dead peer (see above). If
+    // webSocketClose() DOES eventually fire for this same now-demoted
+    // socket, its own #announceRoom call is harmless: `registered` is
+    // already false, so it just re-broadcasts the same, already-current
+    // state (and #getRegisteredSockets never lets a stale/demoted socket
+    // block or affect a NEW device that has since authenticated and taken
+    // its role, since #handleDeviceRegister demotes+closes prior sockets by
+    // identity, independent of this sweep).
+    if (robotIdToAnnounce !== null) this.#announceRoom(robotIdToAnnounce);
     if (anySockets) await this.#state.storage.setAlarm(Date.now() + SWEEP_INTERVAL_MS);
   }
 
