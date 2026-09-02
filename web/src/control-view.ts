@@ -93,7 +93,10 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     const li = document.createElement('li');
     li.dataset.level = level;
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    li.textContent = `${time}  ${text}`;
+    const timeEl = document.createElement('span');
+    timeEl.className = 'log__time';
+    timeEl.textContent = time;
+    li.append(timeEl, `  ${text}`);
     logList.prepend(li);
     while (logList.childElementCount > MAX_EVENTS) logList.lastElementChild?.remove();
   }
@@ -391,11 +394,22 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
 
   let unsubscribeGamepad = startGamepadListener();
 
+  const stopButton = $('#btn-stop', HTMLButtonElement);
+
   function emergencyStop(): void {
     engine.emergencyStop();
     sender.emergencyStop();
     announcements.textContent = 'Emergency stop';
     log('error', 'EMERGENCY STOP');
+    // Momentary confirmation on the button itself (Problem 9 §4) — the
+    // announcement above covers screen readers, this covers a sighted
+    // operator glancing at the button they just pressed.
+    stopButton.classList.remove('e_stop--fired');
+    // Force reflow so re-triggering while the animation is still running
+    // restarts it, instead of the class no-op'ing because it was never
+    // removed from the DOM's perspective.
+    void stopButton.offsetWidth;
+    stopButton.classList.add('e_stop--fired');
   }
 
   // --- controller settings ----------------------------------------------------
@@ -440,7 +454,15 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
   $('#btn-disarm', HTMLButtonElement).addEventListener('click', () => engine.arm(false), {
     signal,
   });
-  $('#btn-stop', HTMLButtonElement).addEventListener('click', emergencyStop, { signal });
+  stopButton.addEventListener('click', emergencyStop, { signal });
+
+  $('#btn-log-clear', HTMLButtonElement).addEventListener(
+    'click',
+    () => {
+      logList.replaceChildren();
+    },
+    { signal },
+  );
 
   linkButton.addEventListener(
     'click',

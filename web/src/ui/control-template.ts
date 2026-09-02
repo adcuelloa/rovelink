@@ -28,6 +28,7 @@ export const CONTROL_TEMPLATE = `
 <div class="console">
   <header class="status-bar area-header">
     <p class="identifier">
+      <span class="brand">RoveLink</span>
       <span class="label">Robot</span>
       <b id="robot-id-value">robot-01</b>
     </p>
@@ -180,6 +181,9 @@ export const CONTROL_TEMPLATE = `
       <span class="label">Events</span>
       <span class="label">Debug</span>
     </summary>
+    <div class="log-toolbar">
+      <button type="button" class="label hover:text-ice" id="btn-log-clear">Clear</button>
+    </div>
     <ol id="log-control" class="log"></ol>
   </details>
 

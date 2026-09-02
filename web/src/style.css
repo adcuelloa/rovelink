@@ -114,6 +114,11 @@ body {
     @apply border-groove bg-panel rounded-md border;
   }
 
+  /* Wordmark: restrained, appears once, never a second logo project. */
+  .brand {
+    @apply text-ice-2 mr-2 text-[0.6rem] font-bold tracking-[0.2em] uppercase;
+  }
+
   .module__header {
     @apply border-groove flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2;
   }
@@ -367,6 +372,26 @@ body {
     box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.45);
   }
 
+  /* Momentary confirmation that the stop was actually sent (Problem 9 §4) —
+   * a brief outline flash, not a persistent state (E-stop has no "on" state
+   * of its own; Armed/Disarmed already carries that). */
+  .e_stop--fired {
+    animation: estop-flash 400ms ease-out;
+  }
+
+  @keyframes estop-flash {
+    0% {
+      box-shadow:
+        0 0 0 4px rgb(255 255 255 / 0.9),
+        inset 0 -3px 0 rgb(0 0 0 / 0.45);
+    }
+    100% {
+      box-shadow:
+        0 0 0 0 rgb(255 255 255 / 0),
+        inset 0 -3px 0 rgb(0 0 0 / 0.45);
+    }
+  }
+
   /* --- touch controls --- */
 
   .touch_controls {
@@ -411,6 +436,10 @@ body {
 
   /* --- log --- */
 
+  .log-toolbar {
+    @apply border-groove flex justify-end border-t px-3 py-1.5;
+  }
+
   .log {
     font-family: var(--font-mono);
     @apply h-36 overflow-y-auto px-3 py-2 text-[0.7rem] leading-relaxed;
@@ -418,6 +447,12 @@ body {
 
   .log li {
     @apply text-ice-2 border-l-2 border-transparent pl-2;
+  }
+
+  /* Timestamp stays visually secondary to the message itself — severity
+   * (the border-color rules below) is the primary signal, not the clock. */
+  .log li .log__time {
+    @apply text-ice-2/60 mr-1;
   }
 
   .log li[data-level='ok'] {
