@@ -60,28 +60,58 @@ body {
 
   /* --- layout --- */
 
+  /* Mobile-first area order (Problem 9 §2/§3): video and safety-critical
+   * controls (Arm/Disarm/E-stop/touch pad) come before the chassis
+   * visualization and telemetry — an operator must never scroll past
+   * diagnostics to reach the stop button. Desktop rearranges the same
+   * six areas into the two-column console via the media query below;
+   * nothing here is duplicated markup, only where the grid places it. */
   .console {
     @apply mx-auto grid max-w-305 gap-3 px-3 py-3 sm:px-5 sm:py-5;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'header'
+      'video'
+      'controls'
+      'chassis'
+      'bus'
+      'events';
   }
 
   @media (min-width: 60rem) {
     .console {
       grid-template-columns: minmax(0, 1.55fr) minmax(17rem, 1fr);
       align-items: start;
+      grid-template-areas:
+        'header  header'
+        'video   video'
+        'chassis bus'
+        'chassis controls'
+        'events  events';
     }
-    .full-width {
-      grid-column: 1 / -1;
-    }
+  }
+
+  .area-header {
+    grid-area: header;
+  }
+  .area-video {
+    grid-area: video;
+  }
+  .area-controls {
+    grid-area: controls;
+  }
+  .area-chassis {
+    grid-area: chassis;
+  }
+  .area-bus {
+    grid-area: bus;
+  }
+  .area-events {
+    grid-area: events;
   }
 
   .module {
     @apply border-groove bg-panel rounded-md border;
-  }
-
-  /* Bus and controls share the narrow column; the chassis occupies the wide one. */
-  .column {
-    @apply grid content-start gap-3;
   }
 
   .module__header {

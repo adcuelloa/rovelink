@@ -26,7 +26,7 @@ const CONTROL_BUTTON = (axis: string, value: string, label: string, glyph: strin
 
 export const CONTROL_TEMPLATE = `
 <div class="console">
-  <header class="status-bar full-width">
+  <header class="status-bar area-header">
     <p class="identifier">
       <span class="label">Robot</span>
       <b id="robot-id-value">robot-01</b>
@@ -41,7 +41,7 @@ export const CONTROL_TEMPLATE = `
     </button>
   </header>
 
-  <section class="module full-width" id="video-panel" aria-labelledby="video-title">
+  <section class="module area-video" id="video-panel" aria-labelledby="video-title">
     <div class="module__header">
       <h2 id="video-title" class="label">Camera</h2>
       <button type="button" class="label hover:text-ice" id="btn-video-toggle" aria-pressed="true">
@@ -62,7 +62,38 @@ export const CONTROL_TEMPLATE = `
     </dl>
   </section>
 
-  <section class="module" id="drive-panel" data-armed="false"
+  <section class="module area-controls" aria-labelledby="controls-title">
+    <div class="module__header">
+      <h2 id="controls-title" class="label">Controls</h2>
+      <button type="button" class="label hover:text-ice" id="btn-link">
+        Disconnect
+      </button>
+    </div>
+
+    <div class="flex flex-wrap items-stretch gap-2 p-3">
+      <button type="button" class="button" id="btn-arm" aria-pressed="false">Arm</button>
+      <button type="button" class="button" id="btn-disarm">Disarm</button>
+      <button type="button" class="e_stop" id="btn-stop">Emergency stop</button>
+    </div>
+
+    <div class="touch_controls border-groove border-t" aria-label="Touch controls">
+      ${CONTROL_BUTTON('throttle', '1', 'Forward', '▲')}
+      ${CONTROL_BUTTON('steering', '-1', 'Left', '◀')}
+      ${CONTROL_BUTTON('steering', '1', 'Right', '▶')}
+      ${CONTROL_BUTTON('throttle', '-1', 'Reverse', '▼')}
+      <button type="button" class="key key--wide" data-gripper="open">Open</button>
+      <button type="button" class="key key--wide" data-gripper="close">Close</button>
+    </div>
+
+    <p class="text-ice-2 border-groove border-t px-3 py-2 text-[0.7rem] leading-relaxed">
+      <b class="text-ice">W A S D</b> or arrows to drive ·
+      <b class="text-ice">Q</b> / <b class="text-ice">E</b> gripper ·
+      <b class="text-ice">Z</b> arm and disarm ·
+      <b class="text-ice">Space</b> emergency stop.
+    </p>
+  </section>
+
+  <section class="module area-chassis" id="drive-panel" data-armed="false"
            aria-labelledby="chassis-title">
     <div class="module__header">
       <h1 id="chassis-title" class="label">Differential drive</h1>
@@ -116,8 +147,7 @@ export const CONTROL_TEMPLATE = `
     </div>
   </section>
 
-  <div class="column">
-  <aside class="module" aria-labelledby="bus-title">
+  <aside class="module area-bus" aria-labelledby="bus-title">
     <div class="module__header">
       <h2 id="bus-title" class="label">Bus</h2>
     </div>
@@ -137,40 +167,7 @@ export const CONTROL_TEMPLATE = `
     </dl>
   </aside>
 
-  <section class="module" aria-labelledby="controls-title">
-    <div class="module__header">
-      <h2 id="controls-title" class="label">Controls</h2>
-      <button type="button" class="label hover:text-ice" id="btn-link">
-        Disconnect
-      </button>
-    </div>
-
-    <div class="flex flex-wrap items-stretch gap-2 p-3">
-      <button type="button" class="button" id="btn-arm" aria-pressed="false">Arm</button>
-      <button type="button" class="button" id="btn-disarm">Disarm</button>
-      <button type="button" class="e_stop" id="btn-stop">Emergency stop</button>
-    </div>
-
-    <div class="touch_controls border-groove border-t" aria-label="Touch controls">
-      ${CONTROL_BUTTON('throttle', '1', 'Forward', '▲')}
-      ${CONTROL_BUTTON('steering', '-1', 'Left', '◀')}
-      ${CONTROL_BUTTON('steering', '1', 'Right', '▶')}
-      ${CONTROL_BUTTON('throttle', '-1', 'Reverse', '▼')}
-      <button type="button" class="key key--wide" data-gripper="open">Open</button>
-      <button type="button" class="key key--wide" data-gripper="close">Close</button>
-    </div>
-
-    <p class="text-ice-2 border-groove border-t px-3 py-2 text-[0.7rem] leading-relaxed">
-      <b class="text-ice">W A S D</b> or arrows to drive ·
-      <b class="text-ice">Q</b> / <b class="text-ice">E</b> gripper ·
-      <b class="text-ice">Z</b> arm and disarm ·
-      <b class="text-ice">Space</b> emergency stop.
-    </p>
-  </section>
-
-  </div>
-
-  <details class="module full-width">
+  <details class="module area-events">
     <summary class="module__header cursor-pointer">
       <span class="label">Events</span>
       <span class="label">Debug</span>
