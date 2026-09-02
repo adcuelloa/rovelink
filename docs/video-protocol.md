@@ -125,7 +125,7 @@ one.
 
 This is flow control, not reliable delivery: an old frame is never
 retransmitted because it went unacked — a viewer that acks is always handed
-the *newest* available frame, never a backlog. An ack must match the
+the _newest_ available frame, never a backlog. An ack must match the
 recorded in-flight frame **exactly** (same `streamSessionId` and `seq`); a
 mismatched ack (wrong session, wrong seq, or no frame in flight — including a
 duplicate ack after the first already released credit) is ignored.
@@ -137,7 +137,13 @@ Relay → viewer(s): published whenever publisher presence changes for
 guess the current state.
 
 ```json
-{ "v": 1, "type": "stream", "robotId": "robot-01", "publisherOnline": true, "streamSessionId": "..." }
+{
+  "v": 1,
+  "type": "stream",
+  "robotId": "robot-01",
+  "publisherOnline": true,
+  "streamSessionId": "..."
+}
 ```
 
 `streamSessionId` is present only while `publisherOnline` is true.
@@ -155,7 +161,7 @@ guess the current state.
   survive the room hibernating
 - **Authenticated takeover**: a new, validly authenticated publisher may
   replace an already-live one (`PUBLISHER_REPLACED`) — models a real camera
-  rebooting without a clean disconnect; an *invalid* new publisher can never
+  rebooting without a clean disconnect; an _invalid_ new publisher can never
   evict the incumbent
 - **Structural JPEG check**: the relay verifies each binary payload starts
   with the JPEG SOI marker (`0xFFD8`) and ends with EOI (`0xFFD9`) before

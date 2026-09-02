@@ -10,12 +10,12 @@ frame.
 
 ## Secrets at a glance
 
-| Secret                 | Set on               | Proves                                          | Verified by                              |
-| ----------------------- | --------------------- | ------------------------------------------------ | ------------------------------------------ |
-| `DEVICE_SECRET`         | control relay         | This ESP32 is the real robot                    | control relay (`device.register`)        |
-| `CONTROLLER_SECRET`     | control relay         | This browser tab is an authorized operator      | control relay (`controller.register`)    |
-| `VIDEO_PUBLISHER_SECRET`| video relay           | This camera is the real robot's camera          | video relay (`publisher.register`)       |
-| `VIDEO_TICKET_SECRET`   | **both** relays, same value | A viewer ticket was minted by the real control relay | video relay (`viewer.register`)     |
+| Secret                   | Set on                      | Proves                                               | Verified by                           |
+| ------------------------ | --------------------------- | ---------------------------------------------------- | ------------------------------------- |
+| `DEVICE_SECRET`          | control relay               | This ESP32 is the real robot                         | control relay (`device.register`)     |
+| `CONTROLLER_SECRET`      | control relay               | This browser tab is an authorized operator           | control relay (`controller.register`) |
+| `VIDEO_PUBLISHER_SECRET` | video relay                 | This camera is the real robot's camera               | video relay (`publisher.register`)    |
+| `VIDEO_TICKET_SECRET`    | **both** relays, same value | A viewer ticket was minted by the real control relay | video relay (`viewer.register`)       |
 
 `VIDEO_TICKET_SECRET` is the only secret shared between the two Workers —
 it is what lets the video relay trust a ticket without ever talking to the
@@ -59,8 +59,8 @@ Registration also decides **occupancy**:
   — the physical robot rebooting — where the old connection often can't close
   itself cleanly.
 - A **controller** registering with a valid token is rejected with `OCCUPIED`
-  (4001) if another controller is already registered *and live* (see
-  [RobotRoom staleness thresholds](architecture.md)). A *stale* incumbent
+  (4001) if another controller is already registered _and live_ (see
+  [RobotRoom staleness thresholds](architecture.md)). A _stale_ incumbent
   (no heartbeat past its threshold) is reclaimed instead — the newcomer takes
   over and the stale socket is closed with `OCCUPIED`.
 
@@ -68,7 +68,7 @@ A newly-promoted controller is issued a server-minted `controlSessionId`
 (`ControlSession` / `controller.session` message), sent to both the
 controller and the current device. Every `control` frame the relay forwards
 onward is re-stamped with that id — the browser can never declare its own
-session. This is what stops a frame delayed from a *previous* controller
+session. This is what stops a frame delayed from a _previous_ controller
 session from ever being treated as authoritative again after a takeover.
 
 ## Operator login (web dashboard)
@@ -137,7 +137,7 @@ the raw payload bytes, before the JSON is ever parsed or trusted.
 - **TTL: 45 seconds** (`VIDEO_TICKET_TTL_MS`) from mint to first use — long
   enough for a normal "request ticket, then dial the video WSS" round trip,
   short enough that a leaked/logged ticket is worthless within a minute. The
-  ticket only authorizes *establishing* the connection; the video relay does
+  ticket only authorizes _establishing_ the connection; the video relay does
   not re-check expiry against an already-live viewer socket.
 - **5 second clock-skew tolerance** (`VIDEO_TICKET_CLOCK_SKEW_MS`) for a
   ticket that looks slightly future-issued, since the two Workers don't share
@@ -154,24 +154,24 @@ a mixed log/trace never has to guess which relay emitted a given code.
 
 ### Control relay (`CLOSE_CODE`, `protocol/src/protocol.ts`)
 
-| Code | Name                 | Meaning                                                          |
-| ---- | -------------------- | ----------------------------------------------------------------- |
-| 4001 | `OCCUPIED`           | A live duplicate role was rejected, or a stale one was reclaimed |
-| 4002 | `DEVICE_REPLACED`    | An authenticated device registration replaced this connection    |
-| 4003 | `AUTH_FAILED`        | `token` missing or did not match the configured credential       |
-| 4004 | `REGISTRATION_TIMEOUT` | Accepted but never registered within the pending window         |
+| Code | Name                   | Meaning                                                          |
+| ---- | ---------------------- | ---------------------------------------------------------------- |
+| 4001 | `OCCUPIED`             | A live duplicate role was rejected, or a stale one was reclaimed |
+| 4002 | `DEVICE_REPLACED`      | An authenticated device registration replaced this connection    |
+| 4003 | `AUTH_FAILED`          | `token` missing or did not match the configured credential       |
+| 4004 | `REGISTRATION_TIMEOUT` | Accepted but never registered within the pending window          |
 
 ### Video relay (`VIDEO_CLOSE_CODE`, `protocol/src/video.ts`)
 
-| Code | Name                   | Meaning                                                                 |
-| ---- | ----------------------- | -------------------------------------------------------------------------- |
+| Code | Name                   | Meaning                                                                      |
+| ---- | ---------------------- | ---------------------------------------------------------------------------- |
 | 4102 | `PROTOCOL_VIOLATION`   | A binary frame with no header, a header with no binary, or a length mismatch |
-| 4103 | `OVERSIZED_FRAME`      | Declared `byteLength` exceeded `MAX_JPEG_BYTES` (256 KiB)               |
-| 4104 | `ACK_TIMEOUT`          | A viewer's in-flight frame went unacknowledged too long                 |
-| 4105 | `AUTH_FAILED`          | Publisher token or viewer ticket rejected, for any reason except expiry |
-| 4106 | `TICKET_EXPIRED`       | A well-formed, correctly signed ticket had simply passed `expiresAt`    |
-| 4107 | `REGISTRATION_TIMEOUT` | Accepted but never registered within the pending window                 |
-| 4108 | `PUBLISHER_REPLACED`   | A new authenticated publisher took over from this one                   |
+| 4103 | `OVERSIZED_FRAME`      | Declared `byteLength` exceeded `MAX_JPEG_BYTES` (256 KiB)                    |
+| 4104 | `ACK_TIMEOUT`          | A viewer's in-flight frame went unacknowledged too long                      |
+| 4105 | `AUTH_FAILED`          | Publisher token or viewer ticket rejected, for any reason except expiry      |
+| 4106 | `TICKET_EXPIRED`       | A well-formed, correctly signed ticket had simply passed `expiresAt`         |
+| 4107 | `REGISTRATION_TIMEOUT` | Accepted but never registered within the pending window                      |
+| 4108 | `PUBLISHER_REPLACED`   | A new authenticated publisher took over from this one                        |
 
 `4101` (`PUBLISHER_OCCUPIED`) is retired: an earlier design unconditionally
 rejected a second publisher; ticket-based authenticated takeover replaced
@@ -181,7 +181,7 @@ reused with a different meaning.
 `AUTH_FAILED` is deliberately generic on both relays: wrong secret, bad
 signature, tampered payload, wrong robot, and wrong role all collapse to the
 same code and the same close reason string, so a failed attempt learns
-nothing about *why* it failed. `TICKET_EXPIRED` is split out because it is
+nothing about _why_ it failed. `TICKET_EXPIRED` is split out because it is
 the one failure an ordinary legitimate client hits often, and the correct
 client behavior differs — ask for a fresh ticket and retry, rather than "the
 credential itself is wrong."
