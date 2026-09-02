@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "npx wrangler deploy",
-    "test": "node --test src/auth/*.test.ts src/control/*.test.ts src/transport/*.test.ts src/video/*.test.ts"
+    "test": "node --test src/auth/*.test.ts src/control/*.test.ts src/health/*.test.ts src/transport/*.test.ts src/video/*.test.ts"
   },
   "dependencies": {
     "@rovelink/protocol": "workspace:*"
