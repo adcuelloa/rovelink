@@ -507,8 +507,22 @@ body {
     stroke-width: 2;
   }
 
-  .controller-diagram__svg rect:not(.controller-diagram__body),
-  .controller-diagram__svg circle {
+  /* Decorative-only regions (Problem 9 §11) — no bindable PhysicalControl
+   * exists for the touchpad or the PS/home roundel, so they never carry
+   * `data-control` and never highlight. */
+  .controller-diagram__touchpad {
+    fill: rgb(255 255 255 / 0.04);
+    stroke: var(--color-groove);
+    stroke-width: 1;
+  }
+  .controller-diagram__home {
+    fill: rgb(255 255 255 / 0.03);
+    stroke: var(--color-groove);
+    stroke-width: 1;
+  }
+
+  .controller-diagram__control rect,
+  .controller-diagram__control circle {
     fill: rgb(255 255 255 / 0.08);
     stroke: var(--color-groove);
     stroke-width: 1;
@@ -517,9 +531,35 @@ body {
       stroke 100ms ease-out;
   }
 
-  .controller-diagram__svg .controller-diagram__active {
+  /* Printed face-button symbols — thin outline, never filled, so pressing
+   * the button (which recolors its cap) does not turn the glyph into a
+   * second solid shape. */
+  .controller-diagram__glyph {
+    fill: none;
+    stroke: var(--color-ice-2);
+    stroke-width: 1.6;
+    pointer-events: none;
+  }
+
+  .controller-diagram__control {
+    cursor: pointer;
+  }
+
+  .controller-diagram__control:hover rect,
+  .controller-diagram__control:hover circle,
+  .controller-diagram__control:focus-visible rect,
+  .controller-diagram__control:focus-visible circle {
+    stroke: var(--color-ice-2);
+  }
+
+  .controller-diagram__control.controller-diagram__active rect,
+  .controller-diagram__control.controller-diagram__active circle {
     fill: var(--color-sodium);
     stroke: var(--color-sodium);
+  }
+
+  .controller-diagram__control.controller-diagram__active .controller-diagram__glyph {
+    stroke: var(--color-carbon);
   }
 
   .settings-live {
