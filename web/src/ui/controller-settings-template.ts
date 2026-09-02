@@ -29,6 +29,7 @@ export const CONTROLLER_SETTINGS_TEMPLATE = `
         <button type="button" class="button" data-profile="stick" id="profile-stick" aria-pressed="false">Stick</button>
         <button type="button" class="button" data-profile="custom" id="profile-custom" aria-pressed="false">Custom</button>
       </div>
+      <p class="text-ice-2 -mt-2 text-[0.7rem] leading-relaxed" id="profile-description"></p>
 
       <div class="controller-diagram" id="controller-diagram">
         ${CONTROLLER_DIAGRAM_SVG}

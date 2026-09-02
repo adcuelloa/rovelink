@@ -10,6 +10,8 @@
  * fresh-listener-on-close sequence that surrounds this.
  */
 
+import { actionForControl, BINDING_ACTIONS } from '../control/binding-lookup.ts';
+import type { BindingAction } from '../control/binding-lookup.ts';
 import { detectActivation } from '../control/capture.ts';
 import type { ButtonControl, PhysicalControl } from '../control/controls.ts';
 import {
@@ -41,20 +43,21 @@ type RebindStep =
   | { readonly kind: 'estop-a' }
   | { readonly kind: 'estop-b'; readonly first: ButtonControl };
 
-const BINDING_ACTIONS = [
-  'throttle',
-  'steering',
-  'gripperOpen',
-  'gripperClose',
-  'arm',
-  'disarm',
-  'emergencyStop',
-] as const;
+/** Plain-language distinction between the presets (Problem 9 §14) — an
+ * operator should never have to read profile JSON to know what each one
+ * means. Custom's line is generated from the live profile itself, since
+ * its bindings vary by definition. */
+const PROFILE_DESCRIPTION: Readonly<Record<'racing' | 'stick', string>> = {
+  racing: 'R2 forward · L2 reverse · Left Stick steering',
+  stick: 'Left Stick drives and steers',
+};
 
-function bindingLabel(
-  profile: ControllerProfile,
-  action: (typeof BINDING_ACTIONS)[number],
-): string {
+function profileDescription(profile: ControllerProfile): string {
+  if (profile.id === 'racing' || profile.id === 'stick') return PROFILE_DESCRIPTION[profile.id];
+  return `Your own bindings — steering on ${profile.steering.axis}`;
+}
+
+function bindingLabel(profile: ControllerProfile, action: BindingAction): string {
   switch (action) {
     case 'throttle':
       return profile.throttle.mode === 'axis'
@@ -95,6 +98,7 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
   const liveR2 = $('#live-r2', HTMLMeterElement);
   const liveThrottle = $('#live-throttle', HTMLElement);
   const liveSteering = $('#live-steering', HTMLElement);
+  const profileDescriptionLine = $('#profile-description', HTMLParagraphElement);
 
   let activeProfile: ControllerProfile = loadProfile();
   let customDraft: ControllerProfile =
@@ -136,6 +140,7 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
         String(activeProfile.id === id),
       );
     }
+    profileDescriptionLine.textContent = profileDescription(activeProfile);
   }
 
   function refreshBindingList(): void {
@@ -258,37 +263,61 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
     $(`#profile-${id}`, HTMLButtonElement).addEventListener('click', () => selectPreset(id));
   }
 
-  // --- wiring: rebind buttons -------------------------------------------------
-  $('#rebind-arm', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'button', action: 'arm' }, 'Press a control for Arm…'),
-  );
-  $('#rebind-disarm', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'button', action: 'disarm' }, 'Press a control for Disarm…'),
-  );
-  $('#rebind-gripperOpen', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'button', action: 'gripperOpen' }, 'Press a control for Gripper open…'),
-  );
-  $('#rebind-gripperClose', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'button', action: 'gripperClose' }, 'Press a control for Gripper close…'),
-  );
-  $('#rebind-steering', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'steering-axis' }, 'Move the stick to use for steering…'),
-  );
-  $('#rebind-emergencyStop', HTMLButtonElement).addEventListener('click', () =>
-    startCapture({ kind: 'estop-a' }, 'Press the first Emergency Stop control…'),
-  );
-  $('#rebind-throttle', HTMLButtonElement).addEventListener('click', () => {
-    // Two ways to bind throttle (section 4): a single stick axis, or two
-    // split controls. A stick movement vs. a button press during capture
-    // disambiguates which the operator means, so one "Rebind" press covers
-    // both — see finishCapture's 'throttle-axis' case: an axis activation
-    // commits it immediately as axis mode, a button activation instead
-    // starts the two-step split forward/reverse capture.
-    startCapture(
-      { kind: 'throttle-axis' },
-      'Move a stick for stick-axis throttle, or press a button for split forward/reverse…',
+  // --- wiring: rebind (buttons and, via the same function, diagram clicks) ---
+  // One entry point per action so the diagram's click-to-rebind (Problem 9
+  // §13) drives the exact same capture flow as its binding-list button —
+  // never a second, parallel path to a rebind.
+  function startRebindFor(action: BindingAction): void {
+    switch (action) {
+      case 'arm':
+        startCapture({ kind: 'button', action: 'arm' }, 'Press a control for Arm…');
+        return;
+      case 'disarm':
+        startCapture({ kind: 'button', action: 'disarm' }, 'Press a control for Disarm…');
+        return;
+      case 'gripperOpen':
+        startCapture(
+          { kind: 'button', action: 'gripperOpen' },
+          'Press a control for Gripper open…',
+        );
+        return;
+      case 'gripperClose':
+        startCapture(
+          { kind: 'button', action: 'gripperClose' },
+          'Press a control for Gripper close…',
+        );
+        return;
+      case 'steering':
+        startCapture({ kind: 'steering-axis' }, 'Move the stick to use for steering…');
+        return;
+      case 'emergencyStop':
+        startCapture({ kind: 'estop-a' }, 'Press the first Emergency Stop control…');
+        return;
+      case 'throttle':
+        // Two ways to bind throttle (section 4): a single stick axis, or
+        // two split controls. A stick movement vs. a button press during
+        // capture disambiguates which the operator means, so one
+        // "Rebind" trigger covers both — see finishCapture's
+        // 'throttle-axis' case: an axis activation commits it immediately
+        // as axis mode, a button activation instead starts the two-step
+        // split forward/reverse capture.
+        startCapture(
+          { kind: 'throttle-axis' },
+          'Move a stick for stick-axis throttle, or press a button for split forward/reverse…',
+        );
+        return;
+      default: {
+        const exhaustive: never = action;
+        return exhaustive;
+      }
+    }
+  }
+
+  for (const action of BINDING_ACTIONS) {
+    $(`#rebind-${action}`, HTMLButtonElement).addEventListener('click', () =>
+      startRebindFor(action),
     );
-  });
+  }
 
   // --- wiring: reset ------------------------------------------------------
   $('#reset-racing', HTMLButtonElement).addEventListener('click', () => {
@@ -304,6 +333,43 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
     refreshBindingList();
     showConflicts(activeProfile);
   });
+
+  // --- wiring: click-to-rebind on the diagram itself (Problem 9 §13) --------
+  // A click on a control's silhouette is a shortcut into the exact same
+  // capture flow as that control's binding-list "Rebind" button — never a
+  // second path to the robot, and never bypassable while a capture is
+  // already in progress.
+  let diagramInfoTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function activateDiagramControl(control: PhysicalControl): void {
+    if (rebindStep !== null) return; // a capture is already in progress
+    const action = actionForControl(activeProfile, control);
+    if (action === null) {
+      if (diagramInfoTimeout !== null) clearTimeout(diagramInfoTimeout);
+      setCaptureMessage(`${control} — not currently bound to an action.`);
+      diagramInfoTimeout = setTimeout(() => {
+        diagramInfoTimeout = null;
+        if (rebindStep === null) setCaptureMessage(null);
+      }, 2200);
+      return;
+    }
+    if (diagramInfoTimeout !== null) {
+      clearTimeout(diagramInfoTimeout);
+      diagramInfoTimeout = null;
+    }
+    startRebindFor(action);
+  }
+
+  for (const control of ALL_CONTROLS) {
+    const el = document.getElementById(`ctrl-${control}`);
+    if (el === null) continue;
+    el.addEventListener('click', () => activateDiagramControl(control));
+    el.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      activateDiagramControl(control);
+    });
+  }
 
   // --- wiring: close --------------------------------------------------------
   function close(): void {
@@ -371,6 +437,8 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
   function unmount(): void {
     if (animation !== null) cancelAnimationFrame(animation);
     animation = null;
+    if (diagramInfoTimeout !== null) clearTimeout(diagramInfoTimeout);
+    diagramInfoTimeout = null;
     container.remove();
   }
 
