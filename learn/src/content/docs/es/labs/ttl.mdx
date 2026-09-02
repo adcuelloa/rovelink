@@ -1,0 +1,13 @@
+---
+title: Seguridad de conexión
+description: Mantener una tecla presionada no alcanza si los frames de control dejan de llegar.
+eyebrow: Seguridad
+---
+
+import { TtlTimeline } from '../../../../components/TtlTimeline.tsx';
+
+Todo mensaje de manejo lleva su propia expiración (`CONTROL_TTL_MS`, 500ms en el protocolo real). Si los frames dejan de llegar — por la razón que sea — el vehículo cae a estado seguro por sí solo, sin esperar a que alguien suelte una tecla.
+
+<TtlTimeline locale="es" client:only="react" />
+
+Un reenvío por heartbeat mantiene el reloj en cero mientras manejas, cómodamente más rápido que el umbral TTL — esa diferencia es deliberada: un paquete perdido ocasional por el jitter normal de la red nunca debe parecer una desconexión real.

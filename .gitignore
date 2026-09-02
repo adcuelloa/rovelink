@@ -3,6 +3,7 @@ dist/
 .wrangler/
 .dev.vars
 *.local
+.astro/
 
 # Test artifacts
 .playwright-mcp/

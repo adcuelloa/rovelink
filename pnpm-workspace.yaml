@@ -7,9 +7,13 @@ packages:
   - video-relay
   - robot-sim
   - demo
+  - learn
 
 # wrangler downloads and links its binaries (workerd and esbuild) on install;
 # without this permission pnpm blocks its scripts and the installation fails.
 allowBuilds:
   esbuild: true
   workerd: true
+
+minimumReleaseAgeExclude:
+  - '@astrojs/starlight'

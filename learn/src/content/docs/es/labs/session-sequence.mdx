@@ -1,0 +1,14 @@
+---
+title: Sesiones y orden de mensajes
+description: Por qué un robot necesita tanto un número de secuencia como un id de sesión.
+eyebrow: Seguridad
+---
+
+import { SessionSequenceLab } from '../../../../components/SessionSequenceLab.tsx';
+
+Dos reglas distintas, con dos trabajos distintos:
+
+- **Número de secuencia** ordena los frames _dentro_ de la conexión de un mismo control — un frame obsoleto o duplicado se descarta.
+- **Sesión de control** da autoridad _a través_ de las vidas del controlador — un frame demorado de un control que desde entonces se reconectó nunca puede volver a pisar el actual, sin importar su número de secuencia.
+
+<SessionSequenceLab locale="es" client:only="react" />

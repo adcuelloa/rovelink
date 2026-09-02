@@ -1,0 +1,14 @@
+---
+title: Latencia y tiempo de ida y vuelta
+description: El RTT del relevo y el RTT de control miden cosas muy distintas.
+eyebrow: Observabilidad
+---
+
+import { RttLab } from '../../../../components/RttLab.tsx';
+
+RoveLink registra dos tiempos de ida y vuelta, deliberadamente separados:
+
+- **RTT del relevo** — un ping respondido en el borde de Cloudflare. Prueba que el camino hacia Cloudflare es rápido. Nunca toca al robot.
+- **RTT de control** — navegador → relevo → dispositivo → relevo → navegador, para un frame que el firmware realmente aplicó. El único número que prueba que el robot físico hizo algo.
+
+<RttLab locale="es" client:only="react" />

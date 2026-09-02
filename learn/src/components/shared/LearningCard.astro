@@ -1,0 +1,74 @@
+---
+/**
+ * Home-page learning-path card: type + title + short purpose + destination.
+ * Plain Astro/CSS, no hydration — used only on the splash page card grid.
+ */
+interface Props {
+  readonly type: string;
+  readonly title: string;
+  readonly href: string;
+  readonly cta: string;
+}
+
+const { type, title, href, cta } = Astro.props;
+---
+
+<a class="rl-card" href={href}>
+  <span class="rl-card__type">{type}</span>
+  <h3 class="rl-card__title">{title}</h3>
+  <p class="rl-card__body"><slot /></p>
+  <span class="rl-card__cta">{cta}</span>
+</a>
+
+<style>
+  .rl-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1.25rem 1.35rem;
+    border: 1px solid var(--rl-border, var(--sl-color-hairline));
+    border-radius: 8px;
+    background: var(--rl-surface-raised, var(--sl-color-bg-nav));
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease;
+  }
+  .rl-card:hover,
+  .rl-card:focus-visible {
+    border-color: var(--rl-accent);
+  }
+  .rl-card:focus-visible {
+    outline: 2px solid var(--rl-accent);
+    outline-offset: 2px;
+  }
+  .rl-card__type {
+    font-family: var(--rl-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rl-accent);
+  }
+  .rl-card__title {
+    margin: 0;
+    font-size: var(--sl-text-lg);
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+  .rl-card__body {
+    margin: 0;
+    flex-grow: 1;
+    font-size: var(--sl-text-sm);
+    line-height: 1.6;
+    color: var(--rl-text-dim, var(--sl-color-gray-3));
+  }
+  .rl-card__cta {
+    margin-top: 0.25rem;
+    font-size: var(--sl-text-sm);
+    font-weight: 500;
+    color: var(--sl-color-text-accent);
+  }
+  .rl-card:hover .rl-card__cta {
+    text-decoration: underline;
+  }
+</style>

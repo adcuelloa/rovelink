@@ -1,0 +1,11 @@
+---
+title: Differential Drive
+description: Turn throttle and steering into two wheel speeds, live.
+eyebrow: Lab
+---
+
+import { DifferentialDrivePlayground } from '../../../components/DifferentialDrivePlayground.tsx';
+
+`differentialMix(throttle, steering) = { left: throttle + steering, right: throttle - steering }` — the exact function shared by `@rovelink/protocol`, the production dashboard, and (as `applyMotors`) the firmware.
+
+<DifferentialDrivePlayground locale="en" client:only="react" />

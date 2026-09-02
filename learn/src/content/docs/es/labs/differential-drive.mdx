@@ -1,0 +1,11 @@
+---
+title: Tracción diferencial
+description: Convierte throttle y steering en dos velocidades de rueda, en vivo.
+eyebrow: Laboratorio
+---
+
+import { DifferentialDrivePlayground } from '../../../../components/DifferentialDrivePlayground.tsx';
+
+`differentialMix(throttle, steering) = { left: throttle + steering, right: throttle - steering }` — la misma función exacta que comparten `@rovelink/protocol`, el panel de producción, y (como `applyMotors`) el firmware.
+
+<DifferentialDrivePlayground locale="es" client:only="react" />

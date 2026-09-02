@@ -6,6 +6,7 @@
     "dev": "pnpm --filter @rovelink/web dev",
     "dev:relay": "pnpm --filter @rovelink/relay dev",
     "dev:demo": "pnpm --filter @rovelink/demo start",
+    "dev:learn": "pnpm --filter @rovelink/learn dev",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "lint": "oxlint",

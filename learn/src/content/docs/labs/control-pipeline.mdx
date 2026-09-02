@@ -1,0 +1,21 @@
+---
+title: Control Flow Lab
+description: Drive a simulated robot and watch every pipeline stage react live.
+eyebrow: Lab
+---
+
+import { ControlPipelineLab } from '../../../components/ControlPipelineLab.tsx';
+import { EN_UI } from '../../../i18n/en.ts';
+
+Drive with **WASD or the arrow keys** (Space to stop, Q/E for the gripper, Z to arm/disarm — the real RoveLink keyboard mapping), the on-screen touch pad, or a real gamepad plugged in and moved. Everything below **CONTROLENGINE**, **CONTROLSENDER**, ownership, and the keyboard/gamepad handling is the actual, unmodified RoveLink code — only the network, relay, and firmware past that point are <span className="rl-badge-sim">SIMULATED</span>.
+
+<ControlPipelineLab client:only="react" locale="en" ui={EN_UI} />
+
+## What you're seeing
+
+- **Input → Ownership**: only one source drives at a time — try holding a key, then touching the pad.
+- **ControlSender**: the send-rhythm decision (immediate / rate / heartbeat) using the real `decideSend()`.
+- **Firmware (sim)**: session, sequence, and disarmed-baseline checks, reproducing `applyControlFrame()` from the real firmware.
+- **Differential mix**: the real `differentialMix()` from `@rovelink/protocol` — identical to what the firmware runs.
+
+Try **Cut connection** while driving, then watch [Connection Safety](/labs/ttl/) for the focused version of what happens next.

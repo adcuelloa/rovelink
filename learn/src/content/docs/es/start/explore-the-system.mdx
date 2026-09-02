@@ -1,0 +1,17 @@
+---
+title: Arquitectura del sistema
+description: Toda la arquitectura de RoveLink como un único diagrama interactivo y por niveles.
+eyebrow: Explorador
+---
+
+import Explorer from '../../../../components/sections/Explorer.astro';
+
+Este es todo el pipeline de RoveLink, como un solo grafo — no tres diagramas separados. Cambia de nivel para ver más o menos detalle; las piezas de abajo nunca cambian de identidad, solo lo que se muestra.
+
+- **Concepto** — cuatro cajas: Tú → Navegador → Relevo de Cloudflare → Robot.
+- **Detalles técnicos** — el pipeline real: entrada, propiedad, perfil, motor de control, emisor, transporte, relevo, sesión, firmware, mezcla, hardware.
+- **Código fuente** — el mismo pipeline hasta símbolos de código individuales, con enlaces a fuente y pruebas.
+
+Haz clic en cualquier caja para abrir su pasaporte: qué hace, por qué está construida así, sus compromisos, y — en el nivel Código — el archivo y símbolo exactos detrás.
+
+<Explorer locale="es" />

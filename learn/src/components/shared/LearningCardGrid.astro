@@ -1,0 +1,21 @@
+---
+// Layout wrapper for LearningCard on the home page.
+---
+
+<div class="rl-home-grid">
+  <slot />
+</div>
+
+<style>
+  .rl-home-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  @media (max-width: 47.9375rem) {
+    .rl-home-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

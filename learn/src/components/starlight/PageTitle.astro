@@ -1,0 +1,51 @@
+---
+/**
+ * Override of Starlight's default PageTitle: adds an optional eyebrow
+ * (category/type label, e.g. "Safety", "Lab") above the heading and renders
+ * the frontmatter description as a lede paragraph — Starlight's default
+ * never surfaces `description` in the page body, only in <meta>.
+ */
+// Starlight's internal PAGE_TITLE_ID constant ("_top") isn't part of its public
+// export map, so it's inlined here to match the anchor Starlight's skip-link targets.
+const PAGE_TITLE_ID = '_top';
+
+const { entry } = Astro.locals.starlightRoute;
+const eyebrow = entry.data.eyebrow as string | undefined;
+const description = entry.data.description;
+---
+
+<div class="rl-page-heading">
+  {eyebrow && <p class="rl-page-eyebrow">{eyebrow}</p>}
+  <h1 id={PAGE_TITLE_ID}>{entry.data.title}</h1>
+  {description && <p class="rl-page-lede">{description}</p>}
+</div>
+
+<style>
+  @layer starlight.core {
+    .rl-page-heading {
+      margin-top: 1rem;
+    }
+    .rl-page-eyebrow {
+      margin: 0 0 0.5rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--rl-accent);
+    }
+    h1 {
+      margin: 0;
+      font-size: var(--sl-text-h1);
+      line-height: var(--sl-line-height-headings);
+      font-weight: 600;
+      color: var(--sl-color-white);
+    }
+    .rl-page-lede {
+      margin: 0.75rem 0 0;
+      max-width: 60ch;
+      font-size: var(--sl-text-lg);
+      line-height: 1.6;
+      color: var(--rl-text-dim, var(--sl-color-gray-3));
+    }
+  }
+</style>

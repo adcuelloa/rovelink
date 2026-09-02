@@ -1,0 +1,13 @@
+---
+title: Connection Safety
+description: Holding a key is not enough if control frames stop actually arriving.
+eyebrow: Safety
+---
+
+import { TtlTimeline } from '../../../components/TtlTimeline.tsx';
+
+Every driving message carries its own expiry (`CONTROL_TTL_MS`, 500ms in the real protocol). If frames stop arriving — for any reason — the vehicle falls back to safe state on its own, without waiting for anyone to release a key.
+
+<TtlTimeline locale="en" client:only="react" />
+
+A heartbeat re-send keeps the clock reset while you're driving, comfortably faster than the TTL threshold — that gap is deliberate: an occasional dropped packet from ordinary network jitter must never look like a real disconnect.

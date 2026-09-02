@@ -1,0 +1,138 @@
+---
+/**
+ * Override of Starlight's default Header: same three-column grid and the
+ * same child components (SiteTitle / Search / SocialIcons / ThemeSelect /
+ * LanguageSelect), with one addition — a compact row of product-level
+ * destinations (Learn / Explore / Labs) next to the site title. Deliberately
+ * does not duplicate every sidebar entry; it's a small set of landing pages.
+ */
+import config from 'virtual:starlight/user-config';
+
+import LanguageSelect from 'virtual:starlight/components/LanguageSelect';
+import Search from 'virtual:starlight/components/Search';
+import SiteTitle from 'virtual:starlight/components/SiteTitle';
+import SocialIcons from 'virtual:starlight/components/SocialIcons';
+import ThemeSelect from 'virtual:starlight/components/ThemeSelect';
+
+const shouldRenderSearch =
+  config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';
+
+// `locale` is undefined for the root (English) locale, e.g. "es" otherwise.
+const locale = Astro.locals.starlightRoute.locale;
+const prefix = locale ? `/${locale}` : '';
+
+const NAV = [
+  { en: 'Learn', es: 'Aprender', href: `${prefix}/start/what-is-rovelink/` },
+  { en: 'Explore', es: 'Explorar', href: `${prefix}/start/explore-the-system/` },
+  { en: 'Labs', es: 'Laboratorios', href: `${prefix}/labs/control-pipeline/` },
+] as const;
+
+const currentPath = Astro.url.pathname.replace(/\/?$/, '/');
+const lang = Astro.locals.starlightRoute.lang;
+const isEs = lang === 'es';
+---
+
+<div class="header">
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+    <nav class="rl-top-nav sl-hidden md:sl-flex" aria-label={isEs ? 'Producto' : 'Product'}>
+      {
+        NAV.map((item) => (
+          <a href={item.href} aria-current={currentPath === item.href ? 'page' : undefined}>
+            {isEs ? item.es : item.en}
+          </a>
+        ))
+      }
+    </nav>
+  </div>
+  <div class="sl-flex print:hidden">{shouldRenderSearch && <Search />}</div>
+  <div class="sl-hidden md:sl-flex print:hidden right-group">
+    <div class="sl-flex social-icons">
+      <SocialIcons />
+    </div>
+    <ThemeSelect />
+    <LanguageSelect />
+  </div>
+</div>
+
+<style>
+  @layer starlight.core {
+    .header {
+      display: flex;
+      gap: var(--sl-nav-gap);
+      justify-content: space-between;
+      align-items: center;
+      height: 100%;
+    }
+
+    .title-wrapper {
+      overflow: clip;
+      padding: 0.25rem;
+      margin: -0.25rem;
+      min-width: 0;
+      gap: 1.5rem;
+      align-items: center;
+    }
+
+    .rl-top-nav {
+      gap: 1.25rem;
+      align-items: center;
+    }
+    .rl-top-nav a {
+      font-size: var(--sl-text-sm);
+      font-weight: 500;
+      color: var(--rl-text-dim, var(--sl-color-gray-2));
+      text-decoration: none;
+      white-space: nowrap;
+      padding: 0.3rem 0;
+      border-bottom: 2px solid transparent;
+    }
+    .rl-top-nav a:hover,
+    .rl-top-nav a:focus-visible {
+      color: var(--sl-color-white);
+    }
+    .rl-top-nav a[aria-current='page'] {
+      color: var(--sl-color-white);
+      border-bottom-color: var(--rl-accent);
+    }
+
+    .right-group,
+    .social-icons {
+      gap: 1rem;
+      align-items: center;
+    }
+    .social-icons::after {
+      content: '';
+      height: 2rem;
+      border-inline-end: 1px solid var(--sl-color-gray-5);
+    }
+
+    @media (min-width: 50rem) {
+      :global(:root[data-has-sidebar]) {
+        --__sidebar-pad: calc(2 * var(--sl-nav-pad-x));
+      }
+      :global(:root:not([data-has-toc])) {
+        --__toc-width: 0rem;
+      }
+      .header {
+        --__sidebar-width: max(0rem, var(--sl-content-inline-start, 0rem) - var(--sl-nav-pad-x));
+        --__main-column-fr: calc(
+          (
+              100% + var(--__sidebar-pad, 0rem) - var(--__toc-width, var(--sl-sidebar-width)) -
+                (2 * var(--__toc-width, var(--sl-nav-pad-x))) - var(--sl-content-inline-start, 0rem) -
+                var(--sl-content-width)
+            ) / 2
+        );
+        display: grid;
+        grid-template-columns:
+          minmax(
+            calc(var(--__sidebar-width) + max(0rem, var(--__main-column-fr) - var(--sl-nav-gap))),
+            auto
+          )
+          1fr
+          auto;
+        align-content: center;
+      }
+    }
+  }
+</style>

@@ -1,0 +1,38 @@
+---
+title: Introducción a RoveLink
+description: Todo el sistema en cuatro pasos, antes de ver código.
+eyebrow: Empieza aquí
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+RoveLink te deja manejar un robot real, por internet, desde una pestaña del navegador. Esa es toda la idea. Todo lo demás en este sitio es el _cómo_ — esta página es solo el _qué_.
+
+## Cuatro pasos
+
+1. **Tú** presionas una tecla, tocas la pantalla, o mueves un control de videojuegos.
+2. **Tu navegador** convierte eso en un mensaje pequeño y constantemente actualizado de "maneja así".
+3. **Un relevo en la nube** (Cloudflare) pasa tu mensaje al único robot que tienes permiso de manejar — y solo tus mensajes, nunca los de nadie más.
+4. **El robot** verifica que el mensaje tenga sentido, y recién entonces gira las ruedas.
+
+<Aside type="tip" title="Míralo en acción">
+  Los cuatro pasos de arriba son exactamente las cuatro cajas de [Arquitectura del
+  sistema](/es/start/explore-the-system/) en el nivel **Concepto** — el mismo grafo, no un diagrama
+  distinto.
+</Aside>
+
+## Por qué esto es más difícil de lo que suena
+
+Un robot que obedece comandos viejos o desordenados es un problema de seguridad, no un simple error. RoveLink está construido alrededor de unas pocas reglas que hacen eso imposible por diseño:
+
+- **Gana el estado más reciente.** No existe ninguna cola de comandos en todo el pipeline — desde el navegador hasta el firmware. Un comando viejo nunca puede reproducirse después de que ya llegó uno más nuevo.
+- **Un watchdog, no buena fe.** Todo mensaje de manejo lleva su propia expiración. Si los mensajes dejan de llegar — se cae el Wi-Fi, una pestaña se congela, Cloudflare falla un instante — el robot se detiene solo, mucho antes de que alguien note que algo anda mal.
+- **Sesiones, no solo números de secuencia.** Reconectar genera una autoridad completamente nueva. Un mensaje demorado de antes de la reconexión nunca puede colarse de vuelta y pisar lo que es actual.
+
+Vas a ver estas tres reglas en vivo, con números reales, en el [Laboratorio de flujo de control](/es/labs/control-pipeline/).
+
+## A dónde ir ahora
+
+- **¿Nuevo en toda la idea?** → [Arquitectura del sistema](/es/start/explore-the-system/) y cambia entre Concepto, Detalles técnicos y Código fuente.
+- **¿Quieres manejar algo ahora mismo?** → [Laboratorio de flujo de control](/es/labs/control-pipeline/).
+- **¿Quieres la historia completa de un comando?** → [Flujo de control](/es/start/r2-to-motors/).

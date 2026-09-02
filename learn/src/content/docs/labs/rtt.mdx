@@ -1,0 +1,14 @@
+---
+title: Latency & Round-Trip Time
+description: Relay RTT and Control RTT measure very different things.
+eyebrow: Observability
+---
+
+import { RttLab } from '../../../components/RttLab.tsx';
+
+RoveLink tracks two round-trip times, deliberately kept separate:
+
+- **Relay RTT** — a ping answered at the Cloudflare edge. Proves the path to Cloudflare is fast. Never touches the robot.
+- **Control RTT** — browser → relay → device → relay → browser, for one frame the firmware actually applied. The only number that proves the physical robot did something.
+
+<RttLab locale="en" client:only="react" />

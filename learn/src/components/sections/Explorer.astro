@@ -1,0 +1,42 @@
+---
+/**
+ * Build-time bridge for the Architecture Explorer: computes the canonical
+ * ELK layout and resolves every source reference to a revision-pinned
+ * GitHub URL in Node (frontmatter runs at build time), then hands plain,
+ * serializable data down to the React island. No `fs`/`child_process`/ELK
+ * call ever reaches the browser bundle.
+ */
+import { ArchitectureExplorer } from '../ArchitectureExplorer.tsx';
+import { computeAllLayouts } from '../../graph/layout.ts';
+import { resolveSourceMap } from '../../graph/source-map.ts';
+import { CONCEPTS, STORIES } from '../../graph/index.ts';
+import type { Level } from '../../graph/types.ts';
+import { conceptCopy, uiStrings } from '../../i18n/index.ts';
+
+interface Props {
+  readonly locale: 'en' | 'es';
+  readonly initialLevel?: Level;
+  readonly focusNodeId?: string;
+  readonly storyId?: string;
+}
+
+const { locale, initialLevel, focusNodeId, storyId } = Astro.props;
+
+const layouts = await computeAllLayouts();
+const sourceMap = resolveSourceMap();
+const concepts = Object.fromEntries(CONCEPTS.map((c) => [c.id, conceptCopy(locale, c.id)]));
+const ui = uiStrings(locale);
+const story = storyId ? STORIES.find((s) => s.id === storyId) : undefined;
+---
+
+<ArchitectureExplorer
+  client:load
+  locale={locale}
+  layouts={layouts}
+  concepts={concepts}
+  sourceMap={sourceMap}
+  ui={ui}
+  initialLevel={initialLevel}
+  focusNodeId={focusNodeId}
+  story={story}
+/>

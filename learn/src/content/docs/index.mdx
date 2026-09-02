@@ -1,0 +1,56 @@
+---
+title: RoveLink Learn
+description: An interactive guide to how RoveLink actually works — visualize it, drive it, break it on purpose.
+template: splash
+hero:
+  title: RoveLink Learn
+  tagline: You don't read how RoveLink works. You drive it, break it on purpose, and watch every stage react.
+  actions:
+    - text: Start from zero
+      link: /start/what-is-rovelink/
+      icon: right-arrow
+    - text: Explore the system
+      link: /start/explore-the-system/
+      variant: secondary
+---
+
+import LearningCard from '../../components/shared/LearningCard.astro';
+import LearningCardGrid from '../../components/shared/LearningCardGrid.astro';
+
+Four ways in — pick where you want to start.
+
+<LearningCardGrid>
+  <LearningCard
+    type="Start here"
+    title="RoveLink Overview"
+    href="/start/what-is-rovelink/"
+    cta="Start from zero →"
+  >
+    The whole system in four steps, before any code.
+  </LearningCard>
+  <LearningCard
+    type="Explorer"
+    title="System Architecture"
+    href="/start/explore-the-system/"
+    cta="Explore the system →"
+  >
+    The full architecture as one interactive diagram — pan, zoom, and open any piece.
+  </LearningCard>
+  <LearningCard
+    type="Guided lesson"
+    title="Control Journey"
+    href="/start/r2-to-motors/"
+    cta="Follow a command →"
+  >
+    Follow a control input through the browser, relay, firmware, and drive system.
+  </LearningCard>
+  <LearningCard
+    type="Lab"
+    title="Control Flow Lab"
+    href="/labs/control-pipeline/"
+    cta="Try it yourself →"
+  >
+    Drive a simulated robot with a keyboard, touchscreen, or gamepad, and watch every stage react
+    live.
+  </LearningCard>
+</LearningCardGrid>

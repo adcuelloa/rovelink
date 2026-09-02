@@ -1,0 +1,17 @@
+---
+title: System Architecture
+description: The full RoveLink architecture as one interactive, leveled diagram.
+eyebrow: Explorer
+---
+
+import Explorer from '../../../components/sections/Explorer.astro';
+
+This is the whole RoveLink pipeline, as one graph — not three separate diagrams. Switch levels to change how much detail you see; the underlying pieces never change identity, only what's visible.
+
+- **Overview** — four boxes: You → Browser → Cloudflare Relay → Robot.
+- **Technical Details** — the real pipeline: input, ownership, profile, engine, sender, transport, relay, session, firmware, mix, hardware.
+- **Source Code** — the same pipeline down to individual source symbols, with source and test links.
+
+Click any box to open its passport: what it does, why it's built that way, its tradeoffs, and — at the Code level — the exact file and symbol behind it.
+
+<Explorer locale="en" />

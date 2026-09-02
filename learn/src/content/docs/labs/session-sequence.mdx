@@ -1,0 +1,14 @@
+---
+title: Sessions & Message Ordering
+description: Why a robot needs both a sequence number and a session id.
+eyebrow: Safety
+---
+
+import { SessionSequenceLab } from '../../../components/SessionSequenceLab.tsx';
+
+Two different rules, doing two different jobs:
+
+- **Sequence number** orders frames _within_ one controller's connection — a stale or duplicate frame is dropped.
+- **Control session** provides authority _across_ controller lifetimes — a delayed frame from a controller that has since reconnected can never come back and override the current one, no matter its sequence number.
+
+<SessionSequenceLab locale="en" client:only="react" />
