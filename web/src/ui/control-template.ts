@@ -14,9 +14,9 @@ const WHEEL = (id: string, klass: string): string => `
     <i class="wheel__power"></i>
   </div>`;
 
-const DATA_POINT = (id: string, label: string, value: string): string => `
+const DATA_POINT = (id: string, label: string, value: string, help?: string): string => `
   <div class="bus__data">
-    <dt class="label">${label}</dt>
+    <dt class="label"${help !== undefined ? ` title="${help}"` : ''}>${label}</dt>
     <dd class="bus__value" id="${id}">${value}</dd>
   </div>`;
 
@@ -31,8 +31,10 @@ export const CONTROL_TEMPLATE = `
       <span class="label">Robot</span>
       <b id="robot-id-value">robot-01</b>
     </p>
-    <p class="status-light" id="chip-robot" data-health="offline" role="status">Offline</p>
-    <p class="status-light" id="chip-armed" data-on="false" role="status">Safe</p>
+    <p class="status-light" id="chip-robot" data-health="offline" role="status"
+       title="Online: the robot is actively responding. Unresponsive: no recent response from the robot. Offline: the robot is no longer connected.">Offline</p>
+    <p class="status-light" id="chip-armed" data-on="false" role="status"
+       title="Armed: the robot will move on command. Safe: driving inputs are ignored.">Safe</p>
     <p class="label flex items-center gap-2">
       Transport: <b>WebSocket</b>
     </p>
@@ -44,7 +46,8 @@ export const CONTROL_TEMPLATE = `
   <section class="module area-video" id="video-panel" aria-labelledby="video-title">
     <div class="module__header">
       <h2 id="video-title" class="label">Camera</h2>
-      <button type="button" class="label hover:text-ice" id="btn-video-toggle" aria-pressed="true">
+      <button type="button" class="label hover:text-ice" id="btn-video-toggle" aria-pressed="true"
+              title="Stops viewing only — does not power off the robot's camera">
         Video: On
       </button>
     </div>
@@ -153,18 +156,23 @@ export const CONTROL_TEMPLATE = `
     </div>
     <dl class="bus">
       ${DATA_POINT('tel-connection', 'Link', 'Disconnected')}
-      ${DATA_POINT('tel-lastseen', 'Last seen', '—')}
-      ${DATA_POINT('tel-control-rtt', 'Control RTT', 'Measuring…')}
-      ${DATA_POINT('tel-rtt', 'Relay RTT', '—')}
-      ${DATA_POINT('tel-estop-rtt', 'E-stop RTT', '—')}
-      ${DATA_POINT('tel-rssi', 'RSSI', '—')}
-      ${DATA_POINT('tel-seq', 'Seq', '0')}
-      ${DATA_POINT('tel-sent', 'TX', '0')}
-      ${DATA_POINT('tel-received', 'RX', '0')}
+      ${DATA_POINT('tel-lastseen', 'Last seen', '—', 'Time since the robot last sent real telemetry')}
+      ${DATA_POINT('tel-control-rtt', 'Control RTT', 'Measuring…', 'Command round trip: browser → relay → robot → relay → browser')}
+      ${DATA_POINT('tel-rtt', 'Relay RTT', '—', 'Browser ↔ RoveLink server only — never touches the robot')}
+      ${DATA_POINT('tel-estop-rtt', 'E-stop RTT', '—', 'Round trip time for the last emergency-stop acknowledgement')}
+      ${DATA_POINT('tel-rssi', 'RSSI', '—', "Robot's WiFi signal strength — closer to 0 dBm is stronger")}
       ${DATA_POINT('tel-gripper', 'Gripper', 'idle')}
       ${DATA_POINT('tel-throttle', 'Robot thr', '0%')}
       ${DATA_POINT('tel-steering', 'Robot str', '0%')}
     </dl>
+    <details class="bus-debug border-groove border-t">
+      <summary class="label cursor-pointer px-3 py-2">Diagnostics</summary>
+      <dl class="bus">
+        ${DATA_POINT('tel-seq', 'Seq', '0')}
+        ${DATA_POINT('tel-sent', 'TX', '0')}
+        ${DATA_POINT('tel-received', 'RX', '0')}
+      </dl>
+    </details>
   </aside>
 
   <details class="module area-events">

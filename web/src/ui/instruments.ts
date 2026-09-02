@@ -10,6 +10,7 @@ import type { Gripper } from '@rovelink/protocol';
 import { differentialMix, wheelPwm } from '@rovelink/protocol';
 
 import type { DeviceHealth } from '../health/device-health.ts';
+import { rssiQuality, rttQuality, SIGNAL_QUALITY_LABEL } from '../health/quality.ts';
 import type { TransportState } from '../transport/types.ts';
 import { $ } from './dom.ts';
 
@@ -171,14 +172,21 @@ export class Instruments {
     if (a.connection !== p.connection) this.#linkValue.textContent = CONNECTION_TEXT[a.connection];
     if (a.rtt !== p.rtt) this.#rttValue.textContent = a.rtt === null ? '—' : `${a.rtt} ms`;
     if (a.controlRtt !== p.controlRtt) {
+      // Quality band is a reading aid alongside the number (Problem 9 §6) —
+      // the raw ms value always stays, nothing is ever hidden behind it.
       this.#controlRttValue.textContent =
-        a.controlRtt === null ? 'Measuring…' : `${a.controlRtt} ms`;
+        a.controlRtt === null
+          ? 'Measuring…'
+          : `${a.controlRtt} ms · ${SIGNAL_QUALITY_LABEL[rttQuality(a.controlRtt)]}`;
     }
     if (a.estopRtt !== p.estopRtt) {
       this.#estopRttValue.textContent = a.estopRtt === null ? '—' : `${a.estopRtt} ms`;
     }
     if (a.lastSeenText !== p.lastSeenText) this.#lastSeenValue.textContent = a.lastSeenText;
-    if (a.rssi !== p.rssi) this.#rssiValue.textContent = a.rssi === null ? '—' : `${a.rssi} dBm`;
+    if (a.rssi !== p.rssi) {
+      this.#rssiValue.textContent =
+        a.rssi === null ? '—' : `${a.rssi} dBm · ${SIGNAL_QUALITY_LABEL[rssiQuality(a.rssi)]}`;
+    }
     if (a.seq !== p.seq) this.#seqValue.textContent = String(a.seq);
     if (a.sent !== p.sent) this.#sentValue.textContent = String(a.sent);
     if (a.received !== p.received) this.#receivedValue.textContent = String(a.received);
