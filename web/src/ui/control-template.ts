@@ -47,6 +47,10 @@ export const CONTROL_TEMPLATE = `
   <section class="module area-video" id="video-panel" aria-labelledby="video-title">
     <div class="module__header">
       <h2 id="video-title" class="label">Camera</h2>
+      <button type="button" class="label hover:text-ice" id="btn-video-focus" aria-pressed="false"
+              title="Expand the camera and hide secondary panels">
+        Focus
+      </button>
       <button type="button" class="label hover:text-ice" id="btn-video-toggle" aria-pressed="true"
               title="Stops viewing only — does not power off the robot's camera">
         Video: On
@@ -151,7 +155,7 @@ export const CONTROL_TEMPLATE = `
     </div>
   </section>
 
-  <aside class="module area-bus" aria-labelledby="bus-title">
+  <aside class="module area-bus" id="bus-panel" aria-labelledby="bus-title">
     <div class="module__header">
       <h2 id="bus-title" class="label">Bus</h2>
     </div>

@@ -450,6 +450,28 @@ export function mountControl(app: HTMLElement, options: ControlViewOptions): () 
     },
   );
 
+  // --- video focus mode (Problem 9 §9) ---------------------------------------
+  // A dashboard focus, not browser fullscreen: hides the chassis and bus
+  // panels so the feed and Controls dominate the viewport, while the
+  // header (health/armed) and Controls (Arm/Disarm/E-stop/touch pad) are
+  // never touched — they were never part of what this hides.
+  const consoleEl = $('.console', HTMLDivElement);
+  const focusButton = $('#btn-video-focus', HTMLButtonElement);
+  const drivePanel = $('#drive-panel', HTMLElement);
+  const busPanel = $('#bus-panel', HTMLElement);
+  let focused = false;
+
+  function setFocus(next: boolean): void {
+    focused = next;
+    consoleEl.dataset.focus = String(focused);
+    drivePanel.hidden = focused;
+    busPanel.hidden = focused;
+    focusButton.textContent = focused ? 'Exit focus' : 'Focus';
+    focusButton.setAttribute('aria-pressed', String(focused));
+  }
+
+  focusButton.addEventListener('click', () => setFocus(!focused), { signal });
+
   $('#btn-arm', HTMLButtonElement).addEventListener('click', () => engine.arm(true), { signal });
   $('#btn-disarm', HTMLButtonElement).addEventListener('click', () => engine.arm(false), {
     signal,

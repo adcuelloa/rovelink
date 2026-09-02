@@ -89,6 +89,12 @@ body {
         'chassis controls'
         'events  events';
     }
+
+    /* Focus mode (Problem 9 §9) hides chassis/bus entirely — let Controls
+     * reclaim the full width rather than leaving column 1 an empty gap. */
+    .console[data-focus='true'] .area-controls {
+      grid-column: 1 / -1;
+    }
   }
 
   .area-header {
@@ -596,6 +602,17 @@ body {
   .video-frame[data-state='waiting-for-publisher'] canvas,
   .video-frame[data-state='reconnecting'] canvas {
     filter: brightness(0.45) saturate(0.5);
+  }
+
+  /* --- video focus mode (Problem 9 §9) ---
+   * A dashboard focus, not browser fullscreen: chassis/bus are hidden
+   * (via the `hidden` attribute, in control-view.ts) so more of the
+   * viewport goes to the feed, while the header (health/armed) and the
+   * Controls panel (Arm/Disarm/E-stop/touch pad) stay exactly where they
+   * are — never hidden, never overlapped. */
+  .console[data-focus='true'] .area-video .video-frame {
+    aspect-ratio: auto;
+    height: min(78dvh, 56.25rem);
   }
 }
 
