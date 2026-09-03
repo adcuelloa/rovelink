@@ -29,13 +29,13 @@ It never touches motors, profiles, or input. It's a pure communication layer.
 The relay URL comes from an environment variable:
 
 ```
-VITE_RELAY_URL=wss://rovelink-relay.cuello.workers.dev
+VITE_RELAY_URL=wss://rovelink-relay.cuello.dev
 ```
 
 The browser opens a WebSocket to:
 
 ```
-wss://rovelink-relay.cuello.workers.dev/robot/r2/controller
+wss://rovelink-relay.cuello.dev/robot/r2/controller
 ```
 
 The `/robot/r2/controller` path tells the relay:

@@ -19,7 +19,7 @@
 
 #elif RELAY_PROFILE == RELAY_PROFILE_CLOUDFLARE
 
-#define RELAY_HOST "rovelink-relay.cuello.workers.dev"
+#define RELAY_HOST "rovelink-relay.cuello.dev"
 #define RELAY_PORT 443
 #define RELAY_USE_TLS 1
 
