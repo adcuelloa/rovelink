@@ -1,0 +1,162 @@
+---
+/**
+ * Compact network path indicator. Shows the physical network topology
+ * (browser → WebSocket → relay → robot room → device) with the current
+ * concept highlighted. Cross-cutting concerns (protocol, authentication,
+ * presence) are shown as separate layers, not hops in the path.
+ */
+interface Props {
+  readonly current: string;
+  readonly labels?: Record<string, string>;
+}
+
+const topology = [
+  { id: 'browser', label: 'BROWSER', slug: 'network/browser-transport' },
+  { id: 'websocket', label: 'WEBSOCKET', slug: 'network/browser-transport' },
+  { id: 'relay', label: 'RELAY', slug: 'network/relay-worker' },
+  { id: 'room', label: 'ROOM', slug: 'network/robot-room' },
+  { id: 'device', label: 'DEVICE', slug: 'network/reconnection' },
+];
+
+const crossCutting = [
+  { id: 'protocol', label: 'Protocol', slug: 'network/protocol' },
+  { id: 'auth', label: 'Auth', slug: 'network/authentication' },
+  { id: 'presence', label: 'Presence', slug: 'network/reconnection' },
+];
+
+const { current, labels } = Astro.props;
+const resolvedLabels = labels ?? {};
+---
+
+<nav class="rl-network-path" aria-label="Network path position">
+  <ol class="rl-network-path__list">
+    {topology.map((stage, i) => {
+      const isActive = stage.id === current;
+      const displayName = resolvedLabels[stage.id] ?? stage.label;
+      return (
+        <li class:list={['rl-network-path__step', { 'rl-network-path__step--active': isActive }]}>
+          {i > 0 && <span class="rl-network-path__arrow" aria-hidden="true">&rarr;</span>}
+          {isActive ? (
+            <span class="rl-network-path__current" aria-current="step">{displayName}</span>
+          ) : (
+            <a class="rl-network-path__link" href={`/${stage.slug}/`}>{displayName}</a>
+          )}
+        </li>
+      );
+    })}
+  </ol>
+  <div class="rl-network-path__layers">
+    <span class="rl-network-path__layers-label">layers:</span>
+    {crossCutting.map((layer) => {
+      const isActive = layer.id === current;
+      const displayName = resolvedLabels[layer.id] ?? layer.label;
+      return isActive ? (
+        <span class="rl-network-path__layer rl-network-path__layer--active">{displayName}</span>
+      ) : (
+        <a class="rl-network-path__layer" href={`/${layer.slug}/`}>{displayName}</a>
+      );
+    })}
+  </div>
+</nav>
+
+<style>
+  .rl-network-path {
+    font-family: var(--rl-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--rl-border, #ccc);
+    border-radius: var(--rl-radius-sm, 4px);
+    background: var(--rl-surface-raised, #fff);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 1.5rem;
+  }
+  .rl-network-path__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rl-network-path__step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    white-space: nowrap;
+  }
+  .rl-network-path__arrow {
+    opacity: 0.35;
+    font-size: 0.8em;
+  }
+  .rl-network-path__link {
+    color: var(--rl-text-dim, #666);
+    text-decoration: none;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .rl-network-path__link:hover {
+    color: var(--rl-accent, #ff8a1e);
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.12));
+  }
+  .rl-network-path__current {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    background: var(--rl-accent, #ff8a1e);
+    color: #1a1300;
+    font-weight: 600;
+  }
+
+  .rl-network-path__layers {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px dashed var(--rl-border, #ddd);
+  }
+  .rl-network-path__layers-label {
+    font-family: var(--rl-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    color: var(--rl-text-dim, #999);
+    text-transform: uppercase;
+  }
+  .rl-network-path__layer {
+    font-family: var(--rl-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.03em;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    color: var(--rl-text-dim, #888);
+    text-decoration: none;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .rl-network-path__layer:hover {
+    color: var(--rl-accent, #ff8a1e);
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.12));
+  }
+  .rl-network-path__layer--active {
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.15));
+    color: var(--rl-accent, #ff8a1e);
+    font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .rl-network-path {
+      font-size: 0.62rem;
+      padding: 0.5rem 0.6rem;
+    }
+    .rl-network-path__link,
+    .rl-network-path__current {
+      padding: 0.12rem 0.25rem;
+    }
+    .rl-network-path__layers {
+      flex-wrap: wrap;
+    }
+  }
+</style>

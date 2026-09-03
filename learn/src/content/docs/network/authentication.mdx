@@ -1,0 +1,104 @@
+---
+title: Authentication
+description: How the relay verifies that only the right device and controller can access a robot.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="auth" />
+
+Anyone can connect to the relay. That's the point — it's publicly accessible. But only the right device and controller should be able to control a specific robot. Authentication makes that happen.
+
+## The credential model
+
+Each robot has two secrets:
+
+- **`DEVICE_SECRET`** — the robot's identity token
+- **`CONTROLLER_SECRET`** — the controller's identity token
+
+These are set on the Cloudflare Worker with `wrangler secret put`, never stored in code or config files. The firmware and browser each carry their own copy.
+
+When a peer connects, it sends a registration message with a `token` field. The relay verifies that token against the configured secret.
+
+## How verification works
+
+The verification lives in `relay/src/auth.ts`. The process:
+
+1. **Hash** — SHA-256 the incoming token
+2. **Compare** — compare the hash against the stored hash using `timingSafeEqual`
+
+```ts
+const incomingHash = crypto.subtle.digest('SHA-256', encoder.encode(token));
+const storedHash = crypto.subtle.digest('SHA-256', encoder.encode(secret));
+const match = timingSafeEqual(incomingHash, storedHash);
+```
+
+Production uses SHA-256 hashing with timing-safe comparison — a standard security practice that prevents timing attacks. The deep dive on _why_ timing-safe comparison matters belongs in a later Security module.
+
+## Fail-closed
+
+What if the secrets aren't configured? The `verifyCredential()` function:
+
+1. Checks if `secret` is empty
+2. If empty, returns `false` immediately
+3. Never compares against an empty string
+
+This is **fail-closed** — if configuration is broken, authentication fails. The alternative (fail-open) would let anyone in when the secret is missing.
+
+```ts
+if (!secret) return false; // fail closed
+```
+
+## What happens on failure
+
+If a peer sends a bad token:
+
+- The relay closes the WebSocket with code `4003` (`AUTH_FAILED`)
+- The reason string is generic — it never reveals the expected value
+- No further messages are processed
+
+The firmware and browser handle `AUTH_FAILED` differently:
+
+- **Firmware**: logs the error, does not reconnect (operator needs to fix the secret)
+- **Browser**: shows an error to the user
+
+<KnowledgeCheck
+  question="Why does the relay never reveal the expected token value in its error message?"
+  answer="An attacker could connect and intentionally send wrong tokens to probe for the expected value. By keeping the error generic, the relay gives no information that could help an attacker guess the secret."
+/>
+
+## The registration flow
+
+Here's the full sequence:
+
+1. **Browser opens WebSocket** to the relay
+2. **Browser sends `controller.register`** with `robotId` and `token`
+3. **Relay verifies the token** against `CONTROLLER_SECRET`
+4. **If valid**: relay promotes the socket, mints a `controlSessionId`, and sends `room` broadcast
+5. **If invalid**: relay closes with `AUTH_FAILED`
+
+The device follows the same pattern with `device.register` and `DEVICE_SECRET`.
+
+## Later phases
+
+Currently, tokens are simple shared secrets. Future work may add:
+
+- Per-device tokens (each robot has a unique secret)
+- Expiring tokens
+- Role-based access control
+
+The `token` field in registration messages is already there — the infrastructure is ready for more sophisticated authentication.
+
+## Key takeaway
+
+Authentication uses SHA-256 hashing with timing-safe comparison. Secrets are never in code. The relay fails closed if configuration is broken, and never reveals expected values in error messages.
+
+## Dive deeper
+
+- [RobotRoom](/network/robot-room/) — where registration happens
+- [The Protocol](/network/protocol/) — the registration message format
+- [Relay Worker](/network/relay-worker/) — where secrets are configured

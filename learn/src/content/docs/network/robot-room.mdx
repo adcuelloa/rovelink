@@ -1,0 +1,106 @@
+---
+title: RobotRoom
+description: The Durable Object that manages one robot's room — device slot, controller slot, presence, and message forwarding.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { RobotRoomSimulator } from '../../../components/network/RobotRoomSimulator.tsx';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="room" />
+
+Every robot gets its own **RobotRoom** — a Durable Object (`relay/src/room.ts`) that manages two slots: one for the device (the ESP32), one for the controller (the browser). When one sends a message, the room forwards it to the other.
+
+## What's a Durable Object?
+
+A Durable Object is a single-instance piece of state that runs on Cloudflare. Think of it like a virtual room:
+
+- Only one instance exists per robot
+- It can hold state (which device/controller is connected)
+- It processes messages in order (no race conditions)
+- It stays alive as long as connections are open
+
+## The two slots
+
+```
+RobotRoom (robot "r2")
+├── device slot:    { ws: WebSocket, lastSeen: 1725400000 }
+├── controller slot: { ws: WebSocket, lastSeen: 1725400000 }
+└── controlSessionId: "abc-123"
+```
+
+Each slot tracks:
+
+- **The WebSocket connection** — to send messages to that peer
+- **Last seen timestamp** — to detect staleness
+- **Registration state** — whether the peer has sent a valid `register` message
+
+Only one device and one controller can be in the room at a time. If a second device connects, the first is replaced.
+
+<RobotRoomSimulator client:load />
+
+## Registration
+
+When a WebSocket connects, the room doesn't immediately trust it. The peer must send a registration message:
+
+```json
+{ "v": 1, "type": "device.register", "robotId": "r2", "token": "***" }
+```
+
+The room:
+
+1. Verifies the token against the configured secret
+2. If valid, marks the slot as registered
+3. Broadcasts a `room` message to both peers
+
+Only after registration can a peer send or receive control messages.
+
+## Message forwarding
+
+The forwarding rules are simple:
+
+| From                | To        | Messages                                         |
+| ------------------- | --------- | ------------------------------------------------ |
+| Controller → Device | Forward   | `control`, `emergency-stop`                      |
+| Device → Controller | Forward   | `telemetry`, `control.ack`, `emergency-stop.ack` |
+| Either → Both       | Broadcast | `room` (presence update)                         |
+
+The relay doesn't interpret messages — it just forwards them. The relay does add one thing: when forwarding a `control` frame, it stamps a `controlSessionId` onto it.
+
+## Why stamp controlSessionId?
+
+The browser never sets `controlSessionId`. The relay does. This is critical for message ordering:
+
+1. Controller A is active, session `abc-123`
+2. Controller A disconnects
+3. Controller B connects, gets session `xyz-789`
+4. A delayed control frame from Controller A arrives
+
+Without session IDs, the device might apply the old frame. With them, the device sees `abc-123` doesn't match the active `xyz-789` and rejects it.
+
+<KnowledgeCheck
+  question="What happens if a second device connects while one is already in the room?"
+  answer="The first device is replaced immediately — it receives a DEVICE_REPLACED close code and its connection is closed. The new device takes the slot."
+/>
+
+## Stale detection
+
+The room periodically checks whether each peer is still responsive:
+
+- **Device stale**: no message received for > 6 seconds (device sends telemetry every ~300ms)
+- **Controller stale**: no message received for > 90 seconds (tolerates backgrounded browser tabs)
+
+When a peer goes stale, the room broadcasts a `room` message with `deviceOnline: false` or `controllerOnline: false`. The browser uses this to show "robot offline" in the UI.
+
+## Key takeaway
+
+RobotRoom is a per-robot Durable Object that manages device and controller slots, verifies registration, forwards messages, stamps control session IDs, and detects staleness.
+
+## Dive deeper
+
+- [The Protocol](/network/protocol/) — the JSON messages flowing through the room
+- [Reconnection & Presence](/network/reconnection/) — how staleness and reconnection work
+- [Authentication](/network/authentication/) — how tokens are verified

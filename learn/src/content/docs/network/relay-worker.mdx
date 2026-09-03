@@ -1,0 +1,117 @@
+---
+title: Relay Worker
+description: The Cloudflare Worker that sits between browser and robot — URL routing, WebSocket upgrade, and Durable Object binding.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="relay" />
+
+The relay is a Cloudflare Worker (`relay/src/index.ts`). It's a small program that runs on Cloudflare's edge network — publicly accessible, always on, no server to manage.
+
+## What the Worker does
+
+When a WebSocket connection arrives, the Worker:
+
+1. **Parses the URL** — extracts the robot ID and role
+2. **Validates the path** — must be `/robot/<id>/<controller|device>`
+3. **Upgrades to WebSocket** — switches from HTTP to WebSocket
+4. **Binds to a Durable Object** — one per robot
+5. **Forwards the connection** — the Durable Object takes over
+
+After that, the Worker itself is done. The Durable Object handles everything else.
+
+## URL parsing
+
+The URL structure is:
+
+```
+/robot/r2/device
+/robot/r2/controller
+```
+
+`parseRoute()` (`relay/src/route.ts`) validates this:
+
+- `robotId`: lowercase letters and digits, 1-32 characters, no consecutive hyphens
+- Role: exactly `device` or `controller`
+
+If the URL doesn't match, the Worker returns a 404.
+
+```ts
+const idRegex = /^[a-z0-9][a-z0-9-]{0,31}$/;
+```
+
+Why so strict? Because the robot ID becomes part of the Durable Object name. Bad input could cause unexpected behavior.
+
+## The Durable Object binding
+
+The Worker's `wrangler.jsonc` declares:
+
+```json
+{
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RobotRoom" }]
+  }
+}
+```
+
+When a connection arrives for robot `r2`, the Worker does:
+
+```ts
+const id = ROOMS.idFromName('r2');
+const stub = ROOMS.get(id);
+```
+
+This creates (or retrieves) a Durable Object named `r2`. Every connection for the same robot goes to the same Durable Object — even if the Worker runs on a different edge location.
+
+## Secrets, not config
+
+The Worker needs three secrets:
+
+- `DEVICE_SECRET` — verifies the robot's token
+- `CONTROLLER_SECRET` — verifies the browser's token
+- `VIDEO_TICKET_SECRET` — mints video viewer tickets
+
+These are set with `wrangler secret put`, never in code. The `wrangler.jsonc` declares them as required, so deployment fails if any is missing.
+
+<KnowledgeCheck
+  question="Why does the Worker parse and validate the URL itself, instead of letting the Durable Object do it?"
+  answer="Validation happens early, before the Durable Object is even invoked. This means malformed requests get rejected quickly without creating or waking up a Durable Object — reducing latency and cost."
+/>
+
+## WebSocket upgrade
+
+The Worker checks for a WebSocket upgrade header:
+
+```ts
+const upgradeHeader = request.headers.get('Upgrade');
+if (upgradeHeader !== 'websocket') {
+  return new Response('Expected WebSocket', { status: 426 });
+}
+```
+
+This is the standard HTTP-to-WebSocket upgrade. The Worker returns a `101 Switching Protocols` response, and the connection becomes a WebSocket.
+
+## Observability
+
+The Worker has observability enabled:
+
+```json
+{ "observability": { "enabled": true } }
+```
+
+This logs structured data to Cloudflare's analytics — connection counts, error rates, latency. No application-level logging needed for basic monitoring.
+
+## Key takeaway
+
+The Relay Worker is a thin routing layer. It parses the URL, validates the path, upgrades to WebSocket, and hands the connection to a Durable Object. After that, the Worker is out of the picture.
+
+## Dive deeper
+
+- [RobotRoom](/network/robot-room/) — what the Durable Object does with the connection
+- [Authentication](/network/authentication/) — how tokens are verified
+- [Why a Relay?](/network/why-relay/) — why the relay exists at all

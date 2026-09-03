@@ -1,0 +1,119 @@
+---
+title: Browser Transport
+description: How the browser opens a WebSocket to the relay, sends control frames, and reconnects when the connection drops.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="browser" />
+
+The browser doesn't speak directly to the robot. It speaks to the **relay** — and the relay speaks to the robot. The browser's half of that conversation lives in `WebSocketTransport`.
+
+## What WebSocketTransport does
+
+`WebSocketTransport` (`web/src/transport/websocket.ts`) manages a single WebSocket connection to the relay. It handles:
+
+- **Connecting** — opening the WebSocket
+- **Sending** — control frames, emergency stops, pings
+- **Receiving** — telemetry, room state, pongs
+- **Reconnecting** — when the connection drops
+
+It never touches motors, profiles, or input. It's a pure communication layer.
+
+## The connection URL
+
+The relay URL comes from an environment variable:
+
+```
+VITE_RELAY_URL=wss://rovelink-relay.cuello.workers.dev
+```
+
+The browser opens a WebSocket to:
+
+```
+wss://rovelink-relay.cuello.workers.dev/robot/r2/controller
+```
+
+The `/robot/r2/controller` path tells the relay:
+
+- Which robot (`r2`)
+- Who's connecting (`controller` — the browser)
+
+## Ping and pong
+
+The transport sends periodic `ping` messages. The relay responds with `pong`. This measures **round-trip time (RTT)** — how long a message takes to go there and back.
+
+```ts
+// browser sends
+{ v: 1, type: "ping", id: 42, sentAt: 1725400000000 }
+
+// relay responds
+{ v: 1, type: "pong", id: 42, sentAt: 1725400000000, echoAt: 1725400000050 }
+```
+
+RTT = `echoAt - sentAt` = 50ms. No synchronized clocks needed — the pong echoes back the ping's `sentAt`.
+
+## What happens when it reconnects
+
+Connections drop. WiFi stutters, the laptop goes to sleep, the relay restarts. When the WebSocket closes:
+
+1. The transport clears its state
+2. It waits a **backoff** period (starts at 1s, doubles each time, maxes at 30s)
+3. It opens a new connection
+4. On success, it resets the backoff to 1s
+
+This is **bounded exponential backoff** — it tries quickly at first, then slows down to avoid flooding the relay with reconnection attempts.
+
+```
+attempt 1: wait 1s  → reconnect
+attempt 2: wait 2s  → reconnect
+attempt 3: wait 4s  → reconnect
+attempt 4: wait 8s  → reconnect
+attempt 5: wait 16s → reconnect
+attempt 6: wait 30s → reconnect (capped)
+```
+
+## The transport API
+
+The rest of the browser code never opens a WebSocket directly. It uses the transport's interface:
+
+```ts
+interface Transport {
+  connect(): void;
+  disconnect(): void;
+  send(message: RemoteMessage): void;
+  on(event: TransportEvent, handler: () => void): void;
+}
+```
+
+Events include `device-activity` (something came from the robot) and `relay-rtt` (a new RTT measurement).
+
+<KnowledgeCheck
+  question="Why does the transport use bounded exponential backoff instead of reconnecting immediately?"
+  answer="Immediate reconnection would flood the relay with connection attempts during a long outage. Backoff starts at 1s and doubles to 30s, reducing load while still reconnecting reasonably quickly."
+/>
+
+## What the transport doesn't know
+
+The transport layer never touches:
+
+- Input devices (keyboard, gamepad)
+- Control profiles
+- The control engine
+- Motors or hardware
+
+It only knows about messages on the wire. This separation means you could swap the WebSocket for a different transport (HTTP, WebRTC) without changing the rest of the browser code.
+
+## Key takeaway
+
+WebSocketTransport is the browser's communication layer. It opens a WebSocket to the relay, sends and receives JSON messages, and reconnects with exponential backoff when the connection drops.
+
+## Dive deeper
+
+- [Why a Relay?](/network/why-relay/) — why a relay exists
+- [The Protocol](/network/protocol/) — the JSON messages on the wire
+- [Rhythm & Heartbeats](/control/rhythm-heartbeats/) — when the browser decides to send

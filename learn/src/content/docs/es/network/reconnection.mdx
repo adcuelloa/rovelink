@@ -1,0 +1,116 @@
+---
+title: Reconexión y Presencia
+description: Cómo el sistema detecta desconexiones, re-establece conexiones, y muestra quién está online.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { PresenceTimeline } from '../../../../components/network/PresenceTimeline.tsx';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="device" />
+
+Las conexiones caen. El WiFi tropieza, las laptops se duermen, los robots se reinician. RoveLink no trata una conexión caída como un error — es un evento normal, esperado. El sistema está diseñado para recuperarse elegantemente.
+
+## El ciclo de reconexión
+
+Cuando un WebSocket se cierra:
+
+1. **Detectar** — el evento `close` se dispara
+2. **Esperar** — delay fijo (1.5s para el transporte de control principal)
+3. **Reconectar** — abrir un nuevo WebSocket
+4. **Re-registrar** — enviar `device.register` o `controller.register`
+5. **Reanudar** — continuar donde quedaste
+
+El transporte de control usa un delay de reconexión fijo en lugar de backoff exponencial. El transporte de video usa backoff exponencial acotado (1s–15s) porque la reconexión de video es menos crítica en latencia.
+
+```
+t=0s:     la conexión cae
+t=1.5s:   intento de reconexión 1 (tiene éxito) → reanudar
+```
+
+## Detección de obsolescencia
+
+El relay no usa heartbeats para detectar desconexiones. En su lugar, usa **umbrales de obsolescencia** basados en cuándo llegó el último mensaje:
+
+- **Dispositivo obsoleto**: ningún mensaje (telemetry, control.ack, emergency-stop.ack) por > 6 segundos
+- **Controlador obsoleto**: ningún mensaje (control, emergency-stop, ping) por > 90 segundos
+
+¿Por qué la asimetría? El firmware del dispositivo envía telemetry cada ~300ms — una brecha de 6 segundos significa que algo está genuinamente mal. Pero la pestaña del navegador puede estar en segundo plano, y Chrome reduce los temporizadores de pestañas ocultas a tan solo un disparo por minuto. Un límite de 90 segundos para el controlador tolera esta reducción sin expulsar falsamente a un operador activo.
+
+El relay barriga conexiones obsoletas cada 3 segundos (su intervalo de alarma).
+
+## ¿Por qué no detección basada en heartbeat?
+
+Algunos sistemas usan heartbeats explícitos "keep alive". RoveLink no los necesita porque:
+
+1. El dispositivo ya envía telemetry cada ~300ms — ESO ES el heartbeat
+2. El navegador ya envía pings cada ~2s — ESO ES el heartbeat
+3. Agregar heartbeats separados duplicaría el tráfico sin beneficio
+
+Los mensajes existentes ya sirven como evidencia de vitalidad.
+
+<PresenceTimeline client:load />
+
+> **Nota:** La línea de tiempo usa umbrales comprimidos para demostración. Los valores de producción son 6s (dispositivo) y 90s (controlador) — ver [RobotRoom](/network/robot-room/).
+
+## El broadcast de la sala
+
+Cuando se detecta obsolescencia (o un par se conecta/desconecta), la sala envía un mensaje `room`:
+
+```json
+{
+  "v": 1,
+  "type": "room",
+  "robotId": "r2",
+  "deviceOnline": true,
+  "controllerOnline": false
+}
+```
+
+Ambos pares lo reciben. El navegador lo usa para actualizar la UI — mostrando "robot offline" o "no controller."
+
+## Qué hace el dispositivo al reconectar
+
+Cuando el ESP32 reconecta:
+
+1. Abre un nuevo WebSocket al relay
+2. Envía `device.register`
+3. Espera un mensaje `room` (prueba de que el registro fue aceptado)
+4. Reanuda el envío de telemetry
+
+El dispositivo no reintenta el último mensaje fallido. No hay cola — si un mensaje de telemetry no pudo enviarse, se fue. El siguiente ciclo de telemetry enviará estado fresco. Esto es intencional: estado viejo es inútil, estado fresco es lo que importa.
+
+## Qué hace el navegador al reconectar
+
+Cuando el navegador reconecta:
+
+1. Abre un nuevo WebSocket al relay
+2. Envía `controller.register`
+3. Espera un mensaje `room`
+4. Reanuda el envío de control frames
+
+El control engine todavía tiene el estado actual (throttle, steering, armed). El primer control frame enviado después de la reconexión actualizará el dispositivo.
+
+<KnowledgeCheck
+  question="¿Por qué el dispositivo usa detección de obsolescencia en vez de depender del evento de cierre del WebSocket?"
+  answer="El evento de cierre del WebSocket podría no dispararse inmediatamente — la conexión podría estar a medias. Al verificar la obsolescencia basándose en timestamps de mensajes reales, el relay detecta desconexiones incluso cuando el evento de cierre está retrasado o se perdió."
+/>
+
+## TTL: el watchdog del enlace
+
+Hay una segunda capa de protección: el **TTL del control frame**. Cada control frame lleva un `ttlMs` (por defecto 500ms). Si el dispositivo no recibe un frame nuevo dentro de esa ventana, se detiene. Esta es la forma en que el sistema detecta una conexión perdida a nivel de firmware — no por timeouts ni heartbeats, sino por la ausencia de nuevos comandos.
+
+Los detalles completos de este comportamiento de "watchdog del enlace" — incluyendo transiciones de estado seguro y apagado de motores — se cubren en el módulo de Seguridad.
+
+## takeaway
+
+La reconexión usa un delay fijo. La detección de obsolescencia usa timestamps de mensajes, no heartbeats. El umbral de obsolescencia del dispositivo es 6 segundos; el del controlador es 90 segundos para tolerar pestañas del navegador en segundo plano.
+
+## Explorar más
+
+- [RobotRoom](/network/robot-room/) — dónde se detecta la obsolescencia
+- [Transporte del navegador](/network/browser-transport/) — lógica de reconexión del navegador
+- [Ritmo y heartbeats](/control/rhythm-heartbeats/) — las reglas de temporización para enviar

@@ -163,6 +163,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented'],
+    learnSlug: 'network/browser-transport',
     sourceRefs: [
       { path: 'web/src/transport/websocket.ts', symbol: 'WebSocketTransport', kind: 'source' },
     ],
@@ -186,6 +187,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'cloud-relay',
     facts: ['implemented'],
+    learnSlug: 'network/relay-worker',
     sourceRefs: [
       { path: 'relay/src/index.ts', kind: 'source' },
       { path: 'relay/src/route.ts', kind: 'source' },
@@ -197,6 +199,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'cloud-relay',
     facts: ['implemented', 'rationale'],
+    learnSlug: 'network/robot-room',
     sourceRefs: [
       { path: 'relay/src/room.ts', symbol: 'RobotRoom', kind: 'source' },
       { path: 'relay/src/room.do.test.ts', kind: 'test' },
@@ -208,6 +211,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'cloud-relay',
     facts: ['implemented', 'rationale'],
+    learnSlug: 'network/robot-room',
     sourceRefs: [
       { path: 'relay/src/room.ts', symbol: 'controlSessionId', kind: 'source' },
       { path: 'protocol/src/protocol.ts', symbol: 'ControlSession', kind: 'source' },
@@ -219,6 +223,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'robot',
     facts: ['implemented'],
+    learnSlug: 'network/reconnection',
     sourceRefs: [{ path: 'firmware/rovelink_device/transport.cpp', kind: 'source' }],
   },
   {

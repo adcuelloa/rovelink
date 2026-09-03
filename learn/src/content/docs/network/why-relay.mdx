@@ -1,0 +1,90 @@
+---
+title: Why a Relay?
+description: Your robot is behind a firewall. The browser can't reach it directly. Here's why — and how a relay solves the problem.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { LocalRemoteVisualizer } from '../../../components/network/LocalRemoteVisualizer.tsx';
+import { NatTableSimulator } from '../../../components/network/NatTableSimulator.tsx';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="relay" />
+
+Your ESP32 says its address is `192.168.0.149`. Why can't a browser in another city connect to it?
+
+Because that address is **private**. It only exists inside your home network. The internet doesn't know how to route packets to `192.168.0.149` — it's like having an extension number that only works inside one office building.
+
+## Private addresses and LANs
+
+Every device on your home WiFi gets a **private IP address** — usually `192.168.x.x` or `10.x.x.x`. These addresses are free, reusable, and worldwide. Your neighbor's laptop might have the exact same `192.168.1.10` as yours.
+
+Private addresses work inside your **LAN** (Local Area Network). Your router knows how to route between them. But the public internet ignores them entirely — there's no global registry for `192.168.0.149`, so no router outside your home knows where to send that packet.
+
+## NAT: the one-way door
+
+Most home routers use **NAT** (Network Address Translation). All your devices share one public IP address, and the router translates between them.
+
+Here's the key: NAT only creates a translation entry when **you** initiate an outbound connection. The router remembers "192.168.0.149:54321 mapped to 203.0.113.7:41200" because the ESP32 opened that connection — not because an outsider asked for it.
+
+<NatTableSimulator client:load />
+
+A stranger who knows your public IP (`203.0.113.7`) still can't reach your ESP32. They don't know which port maps to it — and even if they guessed, the router would drop the packet because no outbound entry exists for that direction.
+
+## CGNAT: when you don't control the router
+
+Mobile networks (4G/5G) often use **CGNAT** (Carrier-Grade NAT). Your phone doesn't get a public IP at all — the carrier shares one across thousands of users. You can't configure port forwarding because you don't own the router. The same applies to some ISPs that use CGNAT for IPv4 address conservation.
+
+## The reachability problem
+
+Even without NAT, there's a deeper issue. On the internet, **both sides are typically behind firewalls.** Neither can accept an incoming connection. If both sides are waiting for someone to knock on their door, nobody ever gets in.
+
+<LocalRemoteVisualizer client:load />
+
+## Port forwarding: possible but fragile
+
+You _could_ configure your router to forward a specific port to the ESP32. But then:
+
+- You're exposing a device directly to the internet
+- Every router brand has a different config UI
+- CGNAT makes it impossible on mobile networks
+- The robot might move between networks (home, school, friend's house)
+- You need to reconfigure every time the robot's local IP changes
+
+## The solution: a relay
+
+Instead of trying to connect directly, both the browser and the robot connect **outbound** to a server in the middle — the **relay**. Since both connections are outbound, NAT and firewalls allow them through.
+
+The relay doesn't control the robot. It doesn't know how motors work. It just:
+
+1. Receives messages from the browser
+2. Forwards them to the robot
+3. Receives messages from the robot
+4. Forwards them to the browser
+
+Think of it like a relay race: one runner hands the baton to the next, but doesn't run the whole race.
+
+<KnowledgeCheck
+  question="Why can't the browser connect directly to the ESP32?"
+  answer="The ESP32 is behind a NAT firewall on a private network. NAT only creates translation entries for outbound connections, so there's no route for incoming packets to reach the ESP32."
+/>
+
+## What's in RoveLink's relay
+
+RoveLink's relay is a Cloudflare Worker — a small program that runs on Cloudflare's edge network. It's publicly accessible, always on, and every device on the internet can reach it.
+
+The relay uses **WebSockets**, not HTTP. A WebSocket is a persistent, two-way connection — like a phone call instead of a series of text messages. Both the browser and the ESP32 open their own WebSocket connection to the relay, and the relay bridges them.
+
+The relay also uses **Durable Objects** — one per robot — to remember which device and controller are currently connected, and to forward messages between them.
+
+## Key takeaway
+
+The relay isn't a middleman that slows things down — it's the only reason the connection exists at all. Without it, the browser and robot can't find each other on the internet.
+
+## Dive deeper
+
+- [Browser Transport](/network/browser-transport/) — how the browser connects to the relay
+- [Relay Worker](/network/relay-worker/) — what the Cloudflare Worker does
+- [RobotRoom](/network/robot-room/) — per-robot Durable Object

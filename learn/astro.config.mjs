@@ -105,6 +105,47 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Network & Relay',
+          translations: { es: 'Red y Relay' },
+          items: [
+            {
+              label: 'Why a Relay?',
+              translations: { es: '¿Por qué un relay?' },
+              slug: 'network/why-relay',
+            },
+            {
+              label: 'Browser Transport',
+              translations: { es: 'Transporte del navegador' },
+              slug: 'network/browser-transport',
+            },
+            {
+              label: 'Relay Worker',
+              translations: { es: 'Relay Worker' },
+              slug: 'network/relay-worker',
+            },
+            {
+              label: 'RobotRoom',
+              translations: { es: 'RobotRoom' },
+              slug: 'network/robot-room',
+            },
+            {
+              label: 'The Protocol',
+              translations: { es: 'El Protocolo' },
+              slug: 'network/protocol',
+            },
+            {
+              label: 'Authentication',
+              translations: { es: 'Autenticación' },
+              slug: 'network/authentication',
+            },
+            {
+              label: 'Reconnection & Presence',
+              translations: { es: 'Reconexión y Presencia' },
+              slug: 'network/reconnection',
+            },
+          ],
+        },
+        {
           label: 'Labs',
           translations: { es: 'Laboratorios' },
           items: [

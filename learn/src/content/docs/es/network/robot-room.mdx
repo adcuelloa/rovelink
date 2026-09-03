@@ -1,0 +1,106 @@
+---
+title: RobotRoom
+description: El Durable Object que gestiona la sala de un robot — slot de dispositivo, slot de controlador, presencia, y reenvío de mensajes.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { RobotRoomSimulator } from '../../../../components/network/RobotRoomSimulator.tsx';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="room" />
+
+Cada robot recibe su propio **RobotRoom** — un Durable Object (`relay/src/room.ts`) que gestiona dos slots: uno para el dispositivo (el ESP32) y uno para el controlador (el navegador). Cuando uno envía un mensaje, la sala lo reenvía al otro.
+
+## ¿Qué es un Durable Object?
+
+Un Durable Object es una pieza de estado de instancia única que corre en Cloudflare. Pensalo como una sala virtual:
+
+- Solo existe una instancia por robot
+- Puede mantener estado (qué dispositivo/controlador está conectado)
+- Procesa mensajes en orden (sin race conditions)
+- Se mantiene vivo mientras haya conexiones abiertas
+
+## Los dos slots
+
+```
+RobotRoom (robot "r2")
+├── device slot:    { ws: WebSocket, lastSeen: 1725400000 }
+├── controller slot: { ws: WebSocket, lastSeen: 1725400000 }
+└── controlSessionId: "abc-123"
+```
+
+Cada slot registra:
+
+- **La conexión WebSocket** — para enviar mensajes a ese par
+- **Timestamp de último visto** — para detectar obsolescencia
+- **Estado de registro** — si el par envió un mensaje `register` válido
+
+Solo un dispositivo y un controlador pueden estar en la sala al mismo tiempo. Si un segundo dispositivo se conecta, el primero es reemplazado.
+
+<RobotRoomSimulator client:load />
+
+## Registro
+
+Cuando un WebSocket se conecta, la sala no lo confía inmediatamente. El par debe enviar un mensaje de registro:
+
+```json
+{ "v": 1, "type": "device.register", "robotId": "r2", "token": "***" }
+```
+
+La sala:
+
+1. Verifica el token contra el secret configurado
+2. Si es válido, marca el slot como registrado
+3. Envía un mensaje `room` a ambos pares
+
+Solo después del registro puede un par enviar o recibir mensajes de control.
+
+## Reenvío de mensajes
+
+Las reglas de reenvío son simples:
+
+| De                  | A         | Mensajes                                         |
+| ------------------- | --------- | ------------------------------------------------ |
+| Controller → Device | Reenviar  | `control`, `emergency-stop`                      |
+| Device → Controller | Reenviar  | `telemetry`, `control.ack`, `emergency-stop.ack` |
+| Cualquiera → Ambos  | Broadcast | `room` (actualización de presencia)              |
+
+El relay no interpreta mensajes — solo los reenvía. El relay sí agrega algo: al reenviar un frame `control`, le estampa un `controlSessionId`.
+
+## ¿Por qué estampar controlSessionId?
+
+El navegador nunca pone `controlSessionId`. Lo pone el relay. Esto es crítico para el orden de mensajes:
+
+1. Controller A está activo, sesión `abc-123`
+2. Controller A se desconecta
+3. Controller B se conecta, recibe sesión `xyz-789`
+4. Un frame `control` retrasado de Controller A llega
+
+Sin session IDs, el dispositivo podría aplicar el frame viejo. Con ellos, el dispositivo ve que `abc-123` no coincide con la activa `xyz-789` y lo rechaza.
+
+<KnowledgeCheck
+  question="¿Qué pasa si un segundo dispositivo se conecta mientras uno ya está en la sala?"
+  answer="El primero es reemplazado inmediatamente — recibe el código de cierre DEVICE_REPLACED y su conexión se cierra. El nuevo dispositivo toma el slot."
+/>
+
+## Detección de obsolescencia
+
+La sala verifica periódicamente si cada par sigue siendo receptivo:
+
+- **Dispositivo obsoleto**: ningún mensaje recibido por > 6 segundos (el dispositivo envía telemetry cada ~300ms)
+- **Controlador obsoleto**: ningún mensaje recibido por > 90 segundos (tolera pestañas del navegador en segundo plano)
+
+Cuando un par se vuelve obsoleto, la sala envía un mensaje `room` con `deviceOnline: false` o `controllerOnline: false`. El navegador usa esto para mostrar "robot offline" en la UI.
+
+## takeaway
+
+RobotRoom es un Durable Object por robot que gestiona slots de dispositivo y controlador, verifica registros, reenvía mensajes, estampa session IDs de control, y detecta obsolescencia.
+
+## Explorar más
+
+- [El Protocolo](/network/protocol/) — los mensajes JSON fluyendo por la sala
+- [Reconexión y Presencia](/network/reconnection/) — cómo funcionan la obsolescencia y reconexión
+- [Autenticación](/network/authentication/) — cómo se verifican los tokens

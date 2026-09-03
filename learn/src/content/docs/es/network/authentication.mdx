@@ -1,0 +1,104 @@
+---
+title: Autenticación
+description: Cómo el relay verifica que solo el dispositivo y controlador correctos puedan acceder a un robot.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="auth" />
+
+Cualquiera puede conectarse al relay. Eso es lo bueno — es accesible públicamente. Pero solo el dispositivo y controlador correctos deberían poder controlar un robot específico. La autenticación hace que eso suceda.
+
+## El modelo de credenciales
+
+Cada robot tiene dos secrets:
+
+- **`DEVICE_SECRET`** — el token de identidad del robot
+- **`CONTROLLER_SECRET`** — el token de identidad del controlador
+
+Se configuran en el Cloudflare Worker con `wrangler secret put`, nunca se almacenan en código ni en archivos de configuración. El firmware y el navegador cada uno llevan su propia copia.
+
+Cuando un par se conecta, envía un mensaje de registro con un campo `token`. El relay verifica ese token contra el secret configurado.
+
+## Cómo funciona la verificación
+
+La verificación vive en `relay/src/auth.ts`. El proceso:
+
+1. **Hashear** — SHA-256 del token entrante
+2. **Comparar** — comparar el hash contra el hash almacenado usando `timingSafeEqual`
+
+```ts
+const incomingHash = crypto.subtle.digest('SHA-256', encoder.encode(token));
+const storedHash = crypto.subtle.digest('SHA-256', encoder.encode(secret));
+const match = timingSafeEqual(incomingHash, storedHash);
+```
+
+La producción usa hashing SHA-256 con comparación timing-safe — una práctica estándar de seguridad que previene ataques de timing. La explicación profunda de _por qué_ importa la comparación timing-safe pertenece a un módulo posterior de Seguridad.
+
+## Fail-closed
+
+¿Qué pasa si los secrets no están configurados? La función `verifyCredential()`:
+
+1. Verifica si `secret` está vacío
+2. Si está vacío, retorna `false` inmediatamente
+3. Nunca compara contra un string vacío
+
+Esto es **fail-closed** — si la configuración está rota, la autenticación falla. La alternativa (fail-open) dejaría entrar a cualquiera cuando falta el secret.
+
+```ts
+if (!secret) return false; // fail closed
+```
+
+## Qué pasa en caso de fallo
+
+Si un par envía un token incorrecto:
+
+- El relay cierra el WebSocket con código `4003` (`AUTH_FAILED`)
+- La cadena de razón es genérica — nunca revela el valor esperado
+- No se procesan más mensajes
+
+El firmware y el navegador manejan `AUTH_FAILED` de manera diferente:
+
+- **Firmware**: registra el error, no reconecta (el operador necesita arreglar el secret)
+- **Navegador**: muestra un error al usuario
+
+<KnowledgeCheck
+  question="¿Por qué el relay nunca revela el valor del token esperado en su mensaje de error?"
+  answer="Un atacante podría conectarse y enviar tokens incorrectos intencionalmente para sondear el valor esperado. Manteniendo el error genérico, el relay no da información que pueda ayudar a un atacante a adivinar el secret."
+/>
+
+## El flujo de registro
+
+Acá está la secuencia completa:
+
+1. **El navegador abre un WebSocket** al relay
+2. **El navegador envía `controller.register`** con `robotId` y `token`
+3. **El relay verifica el token** contra `CONTROLLER_SECRET`
+4. **Si es válido**: el relay promueve el socket, acuña un `controlSessionId`, y envía el broadcast `room`
+5. **Si es inválido**: el relay cierra con `AUTH_FAILED`
+
+El dispositivo sigue el mismo patrón con `device.register` y `DEVICE_SECRET`.
+
+## Fases futuras
+
+Actualmente, los tokens son secrets compartidos simples. Trabajo futuro puede incluir:
+
+- Tokens por dispositivo (cada robot tiene un secret único)
+- Tokens con expiración
+- Control de acceso basado en roles
+
+El campo `token` en mensajes de registro ya está ahí — la infraestructura está lista para autenticación más sofisticada.
+
+## takeaway
+
+La autenticación usa hashing SHA-256 con comparación timing-safe. Los secrets nunca están en código. El relay falla cerrado si la configuración está rota, y nunca revela valores esperados en mensajes de error.
+
+## Explorar más
+
+- [RobotRoom](/network/robot-room/) — dónde ocurre el registro
+- [El Protocolo](/network/protocol/) — el formato del mensaje de registro
+- [Relay Worker](/network/relay-worker/) — dónde se configuran los secrets

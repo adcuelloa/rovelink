@@ -1,0 +1,116 @@
+---
+title: Reconnection & Presence
+description: How the system detects disconnections, re-establishes connections, and shows who's online.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { PresenceTimeline } from '../../../components/network/PresenceTimeline.tsx';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="device" />
+
+Connections drop. WiFi stutters, laptops go to sleep, robots reboot. RoveLink doesn't treat a dropped connection as an error — it's a normal, expected event. The system is designed to recover gracefully.
+
+## The reconnection cycle
+
+When a WebSocket closes:
+
+1. **Detect** — the `close` event fires
+2. **Wait** — fixed delay (1.5s for the main control transport)
+3. **Reconnect** — open a new WebSocket
+4. **Re-register** — send `device.register` or `controller.register`
+5. **Resume** — pick up where you left off
+
+The control transport uses a fixed reconnect delay rather than exponential backoff. The video transport uses bounded exponential backoff (1s–15s) because video reconnection is less latency-critical.
+
+```
+t=0s:     connection drops
+t=1.5s:   reconnect attempt 1 (succeeds) → resume
+```
+
+## Staleness detection
+
+The relay doesn't use heartbeats to detect disconnections. Instead, it uses **staleness thresholds** based on when the last message arrived:
+
+- **Device stale**: no message (telemetry, control.ack, emergency-stop.ack) for > 6 seconds
+- **Controller stale**: no message (control, emergency-stop, ping) for > 90 seconds
+
+Why the asymmetry? The device firmware sends telemetry every ~300ms — a 6-second gap means something is genuinely wrong. But the browser tab may be backgrounded, and Chrome throttles hidden tab timers to as little as one firing per minute. A 90-second controller bound tolerates this throttling without falsely evicting a live operator.
+
+The relay sweeps for stale connections every 3 seconds (its alarm interval).
+
+## Why no heartbeat-based detection?
+
+Some systems use explicit "keep alive" heartbeats. RoveLink doesn't need them because:
+
+1. The device already sends telemetry every ~300ms — that IS the heartbeat
+2. The browser already sends pings every ~2s — that IS the heartbeat
+3. Adding separate heartbeats would double the traffic for no benefit
+
+The existing messages already serve as evidence of liveness.
+
+<PresenceTimeline client:load />
+
+> **Note:** The timeline above uses compressed thresholds for demonstration. Production values are 6s (device) and 90s (controller) — see [RobotRoom](/network/robot-room/).
+
+## The room broadcast
+
+When staleness is detected (or a peer connects/disconnects), the room broadcasts a `room` message:
+
+```json
+{
+  "v": 1,
+  "type": "room",
+  "robotId": "r2",
+  "deviceOnline": true,
+  "controllerOnline": false
+}
+```
+
+Both peers receive this. The browser uses it to update the UI — showing "robot offline" or "no controller."
+
+## What the device does on reconnect
+
+When the ESP32 reconnects:
+
+1. It opens a new WebSocket to the relay
+2. It sends `device.register`
+3. It waits for a `room` message (proof registration was accepted)
+4. It resumes sending telemetry
+
+The device doesn't retry the last failed message. There's no queue — if a telemetry message couldn't send, it's gone. The next telemetry cycle will send fresh state. This is intentional: old state is useless, fresh state is what matters.
+
+## What the browser does on reconnect
+
+When the browser reconnects:
+
+1. It opens a new WebSocket to the relay
+2. It sends `controller.register`
+3. It waits for a `room` message
+4. It resumes sending control frames
+
+The control engine still has the current state (throttle, steering, armed). The first control frame sent after reconnection will update the device.
+
+<KnowledgeCheck
+  question="Why does the device use staleness detection instead of relying on the WebSocket close event?"
+  answer="The WebSocket close event might not fire immediately — the connection could be half-dead. By checking staleness based on actual message timestamps, the relay detects disconnections even when the close event is delayed or lost."
+/>
+
+## TTL: the link watchdog
+
+There's a second layer of protection: the **control frame TTL**. Every control frame carries a `ttlMs` (default 500ms). If the device doesn't receive a new frame within that window, it stops. This is how the system detects a lost connection at the firmware level — not by timeouts or heartbeats, but by the absence of new commands.
+
+The full details of this "link watchdog" behavior — including safe-state transitions and motor shutdown — are covered in the Safety module.
+
+## Key takeaway
+
+Reconnection uses a fixed delay. Staleness detection uses message timestamps, not heartbeats. The device stale threshold is 6 seconds; the controller threshold is 90 seconds to tolerate backgrounded browser tabs.
+
+## Dive deeper
+
+- [RobotRoom](/network/robot-room/) — where staleness is detected
+- [Browser Transport](/network/browser-transport/) — browser reconnection logic
+- [Rhythm & Heartbeats](/control/rhythm-heartbeats/) — the timing rules for sending

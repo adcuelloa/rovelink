@@ -8,6 +8,7 @@ import { CONCEPTS } from './concepts.ts';
 const DOCS = join(import.meta.dirname, '..', 'content', 'docs');
 const CONTROL_EN = join(DOCS, 'control');
 const CONTROL_ES = join(DOCS, 'es', 'control');
+const NETWORK_EN = join(DOCS, 'network');
 
 const CONTROL_SLUGS = [
   'browser-input',
@@ -102,8 +103,9 @@ test('every EN control lesson has educational structure', async () => {
 test('every learnSlug in CONCEPTS points to an existing EN lesson', async () => {
   for (const concept of CONCEPTS) {
     if (!concept.learnSlug) continue;
-    const slug = concept.learnSlug.replace('control/', '');
-    const path = join(CONTROL_EN, `${slug}.mdx`);
+    const [category, slug] = concept.learnSlug.split('/');
+    const dir = category === 'network' ? NETWORK_EN : CONTROL_EN;
+    const path = join(dir, `${slug}.mdx`);
     try {
       await readFile(path);
     } catch {

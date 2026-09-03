@@ -1,0 +1,117 @@
+---
+title: Relay Worker
+description: El Cloudflare Worker que se sienta entre navegador y robot — routing de URLs, upgrade a WebSocket, y binding a Durable Objects.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="relay" />
+
+El relay es un Cloudflare Worker (`relay/src/index.ts`). Es un programa pequeño que corre en la red edge de Cloudflare — accesible públicamente, siempre encendido, sin servidor que administrar.
+
+## Qué hace el Worker
+
+Cuando llega una conexión WebSocket, el Worker:
+
+1. **Parsea la URL** — extrae el ID del robot y el rol
+2. **Valida la ruta** — debe ser `/robot/<id>/<controller|device>`
+3. **Hace upgrade a WebSocket** — cambia de HTTP a WebSocket
+4. **Se vincula a un Durable Object** — uno por robot
+5. **Reenvía la conexión** — el Durable Object se hace cargo
+
+Después de eso, el Worker mismo está fuera de la imagen. El Durable Object maneja todo lo demás.
+
+## Parsing de URLs
+
+La estructura de la URL es:
+
+```
+/robot/r2/device
+/robot/r2/controller
+```
+
+`parseRoute()` (`relay/src/route.ts`) valida esto:
+
+- `robotId`: letras minúsculas y dígitos, 1-32 caracteres, sin guiones consecutivos
+- Rol: exactamente `device` o `controller`
+
+Si la URL no coincide, el Worker retorna un 404.
+
+```ts
+const idRegex = /^[a-z0-9][a-z0-9-]{0,31}$/;
+```
+
+¿Por qué tan estricto? Porque el ID del robot se convierte en parte del nombre del Durable Object. Input inválido podría causar comportamiento inesperado.
+
+## El binding a Durable Objects
+
+El `wrangler.jsonc` del Worker declara:
+
+```json
+{
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RobotRoom" }]
+  }
+}
+```
+
+Cuando llega una conexión para el robot `r2`, el Worker hace:
+
+```ts
+const id = ROOMS.idFromName('r2');
+const stub = ROOMS.get(id);
+```
+
+Esto crea (o recupera) un Durable Object llamado `r2`. Cada conexión para el mismo robot va al mismo Durable Object — incluso si el Worker corre en una ubicación edge diferente.
+
+## Secrets, no config
+
+El Worker necesita tres secrets:
+
+- `DEVICE_SECRET` — verifica el token del robot
+- `CONTROLLER_SECRET` — verifica el token del navegador
+- `VIDEO_TICKET_SECRET` — genera tickets de video viewer
+
+Se configuran con `wrangler secret put`, nunca en código. El `wrangler.jsonc` los declara como requeridos, así que el deploy falla si falta alguno.
+
+<KnowledgeCheck
+  question="¿Por qué el Worker parsea y valida la URL por sí mismo, en vez de dejar que el Durable Object lo haga?"
+  answer="La validación ocurre temprano, antes de que el Durable Object sea invocado. Así que las peticiones malformadas se rechazan rápidamente sin crear o despertar un Durable Object — reduciendo latencia y costo."
+/>
+
+## Upgrade a WebSocket
+
+El Worker verifica un header de upgrade a WebSocket:
+
+```ts
+const upgradeHeader = request.headers.get('Upgrade');
+if (upgradeHeader !== 'websocket') {
+  return new Response('Expected WebSocket', { status: 426 });
+}
+```
+
+Este es el upgrade estándar de HTTP a WebSocket. El Worker retorna una respuesta `101 Switching Protocols`, y la conexión se convierte en un WebSocket.
+
+## Observability
+
+El Worker tiene observability habilitada:
+
+```json
+{ "observability": { "enabled": true } }
+```
+
+Esto registra datos estructurados en la analítica de Cloudflare — conteos de conexiones, tasas de error, latencia. No necesita logging a nivel de aplicación para monitoreo básico.
+
+## takeaway
+
+El Relay Worker es una capa de routing delgada. Parsea la URL, valida la ruta, hace upgrade a WebSocket, y entrega la conexión a un Durable Object. Después de eso, el Worker fuera de la imagen.
+
+## Explorar más
+
+- [RobotRoom](/network/robot-room/) — qué hace el Durable Object con la conexión
+- [Autenticación](/network/authentication/) — cómo se verifican los tokens
+- [¿Por qué un relay?](/network/why-relay/) — por qué existe el relay

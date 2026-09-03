@@ -1,0 +1,119 @@
+---
+title: Transporte del navegador
+description: Cómo el navegador abre un WebSocket al relay, envía control frames, y reconecta cuando la conexión cae.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="browser" />
+
+El navegador no habla directamente con el robot. Habla con el **relay** — y el relay habla con el robot. La mitad de esa conversación del navegador vive en `WebSocketTransport`.
+
+## Qué hace WebSocketTransport
+
+`WebSocketTransport` (`web/src/transport/websocket.ts`) maneja una única conexión WebSocket al relay. Se encarga de:
+
+- **Conectar** — abrir el WebSocket
+- **Enviar** — control frames, emergency stops, pings
+- **Recibir** — telemetry, room state, pongs
+- **Reconectar** — cuando la conexión cae
+
+Nunca toca motores, perfiles, o entrada. Es una capa de comunicación pura.
+
+## La URL de conexión
+
+La URL del relay viene de una variable de entorno:
+
+```
+VITE_RELAY_URL=wss://rovelink-relay.cuello.workers.dev
+```
+
+El navegador abre un WebSocket a:
+
+```
+wss://rovelink-relay.cuello.workers.dev/robot/r2/controller
+```
+
+La ruta `/robot/r2/controller` le dice al relay:
+
+- Qué robot (`r2`)
+- Quién se conecta (`controller` — el navegador)
+
+## Ping y pong
+
+El transporte envía mensajes `ping` periódicos. El relay responde con `pong`. Esto mide el **tiempo de ida y vuelta (RTT)** — cuánto tarda un mensaje en ir y volver.
+
+```ts
+// el navegador envía
+{ v: 1, type: "ping", id: 42, sentAt: 1725400000000 }
+
+// el relay responde
+{ v: 1, type: "pong", id: 42, sentAt: 1725400000000, echoAt: 1725400000050 }
+```
+
+RTT = `echoAt - sentAt` = 50ms. No necesita relojes sincronizados — el pong devuelve el `sentAt` del ping.
+
+## Qué pasa cuando reconecta
+
+Las conexiones caen. El WiFi tropieza, la laptop se duerme, el relay se reinicia. Cuando el WebSocket se cierra:
+
+1. El transporte limpia su estado
+2. Espera un período de **backoff** (empieza en 1s, se duplica cada vez, máximo 30s)
+3. Abre una nueva conexión
+4. Al tener éxito, resetea el backoff a 1s
+
+Esto es **backoff exponencial acotado** — intenta rápido al principio, luego se ralentiza para evitar saturar el relay con intentos de reconexión.
+
+```
+intento 1: esperar 1s  → reconectar
+intento 2: esperar 2s  → reconectar
+intento 3: esperar 4s  → reconectar
+intento 4: esperar 8s  → reconectar
+intento 5: esperar 16s → reconectar
+intento 6: esperar 30s → reconectar (tope)
+```
+
+## La API del transporte
+
+El resto del código del navegador nunca abre un WebSocket directamente. Usa la interfaz del transporte:
+
+```ts
+interface Transport {
+  connect(): void;
+  disconnect(): void;
+  send(message: RemoteMessage): void;
+  on(event: TransportEvent, handler: () => void): void;
+}
+```
+
+Los eventos incluyen `device-activity` (algo llegó del robot) y `relay-rtt` (una nueva medición de RTT).
+
+<KnowledgeCheck
+  question="¿Por qué el transporte usa backoff exponencial acotado en vez de reconectar inmediatamente?"
+  answer="La reconexión inmediata saturaría el relay con intentos de conexión durante una interrupción prolongada. El backoff empieza en 1s y se duplica hasta 30s, reduciendo la carga mientras sigue reconectando razonablemente rápido."
+/>
+
+## Qué no sabe el transporte
+
+La capa de transporte nunca toca:
+
+- Dispositivos de entrada (teclado, gamepad)
+- Perfiles de control
+- El control engine
+- Motores o hardware
+
+Solo conoce mensajes en la red. Esta separación significa que podrías cambiar el WebSocket por un transporte diferente (HTTP, WebRTC) sin cambiar el resto del código del navegador.
+
+## takeaway
+
+WebSocketTransport es la capa de comunicación del navegador. Abre un WebSocket al relay, envía y recibe mensajes JSON, y reconecta con backoff exponencial cuando la conexión cae.
+
+## Explorar más
+
+- [¿Por qué un relay?](/network/why-relay/) — por qué existe un relay
+- [El Protocolo](/network/protocol/) — los mensajes JSON en la red
+- [Ritmo y heartbeats](/control/rhythm-heartbeats/) — cuándo el navegador decide enviar

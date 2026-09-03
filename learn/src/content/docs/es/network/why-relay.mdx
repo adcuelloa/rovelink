@@ -1,0 +1,90 @@
+---
+title: ¿Por qué un relay?
+description: Tu robot está detrás de un firewall. El navegador no puede acceder directamente. Esto es por qué — y cómo un relay resuelve el problema.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { LocalRemoteVisualizer } from '../../../../components/network/LocalRemoteVisualizer.tsx';
+import { NatTableSimulator } from '../../../../components/network/NatTableSimulator.tsx';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="relay" />
+
+Tu ESP32 dice que su dirección es `192.168.0.149`. ¿Por qué un navegador en otra ciudad no puede conectarse a ella?
+
+Porque esa dirección es **privada**. Solo existe dentro de tu red doméstica. Internet no sabe cómo enrutar paquetes a `192.168.0.149` — es como tener un número de extensión que solo funciona dentro de una oficina.
+
+## Direcciones privadas y LAN
+
+Cada dispositivo en tu WiFi recibe una **dirección IP privada** — generalmente `192.168.x.x` o `10.x.x.x`. Estas direcciones son gratuitas, reutilizables y universales. La laptop de tu vecino podría tener exactamente la misma `192.168.1.10` que la tuya.
+
+Las direcciones privadas funcionan dentro de tu **LAN** (Local Area Network). Tu router sabe cómo enrutar entre ellas. Pero internet público las ignora por completo — no hay un registro global para `192.168.0.149`, así que ningún router fuera de tu casa sabe dónde enviar ese paquete.
+
+## NAT: la puerta de un solo sentido
+
+La mayoría de los routers domésticos usan **NAT** (Network Address Translation). Todos tus dispositivos comparten una IP pública, y el router traduce entre ellos.
+
+La clave: NAT solo crea una entrada de traducción cuando **vos** iniciás una conexión saliente. El router recuerda "192.168.0.149:54321 se mapeó a 203.0.113.7:41200" porque el ESP32 abrió esa conexión — no porque alguien de afuera la pidió.
+
+<NatTableSimulator client:load />
+
+Un desconocido que conoce tu IP pública (`203.0.113.7`) todavía no puede llegar a tu ESP32. No sabe qué puerto le corresponde — y aunque lo adivinara, el router descartaría el paquete porque no existe una entrada saliente para esa dirección.
+
+## CGNAT: cuando no controlás el router
+
+Las redes móviles (4G/5G) a menudo usan **CGNAT** (Carrier-Grade NAT). Tu teléfono no recibe una IP pública en absoluto — el operador comparte una entre miles de usuarios. No podés configurar port forwarding porque no sos dueño del router. Lo mismo aplica a algunos proveedores de internet que usan CGNAT para conservar direcciones IPv4.
+
+## El problema de alcanzabilidad
+
+Incluso sin NAT, hay un problema más profundo. En internet, **ambos lados están típicamente detrás de firewalls.** Ninguno puede aceptar una conexión entrante. Si ambos lados están esperando que alguien toque a su puerta, nadie entra nunca.
+
+<LocalRemoteVisualizer client:load />
+
+## Port forwarding: posible pero frágil
+
+_Podrías_ configurar tu router para reenviar un puerto específico al ESP32. Pero entonces:
+
+- Estás exponiendo un dispositivo directamente a internet
+- Cada marca de router tiene una interfaz diferente
+- CGNAT lo hace imposible en redes móviles
+- El robot podría moverse entre redes (casa, escuela, casa de un amigo)
+- Tenés que reconfigurar cada vez que la IP local del robot cambia
+
+## La solución: un relay
+
+En vez de intentar conectar directamente, tanto el navegador como el robot se conectan **hacia afuera** a un servidor en el medio — el **relay**. Como ambas conexiones son salientes, NAT y los firewalls los dejan pasar.
+
+El relay no controla el robot. No sabe cómo funcionan los motores. Solo:
+
+1. Recibe mensajes del navegador
+2. Los reenvía al robot
+3. Recibe mensajes del robot
+4. Los reenvía al navegador
+
+Es como una carrera de relevos: un corredor le pasa el testigo al siguiente, pero no corre toda la carrera.
+
+<KnowledgeCheck
+  question="¿Por qué el navegador no puede conectarse directamente al ESP32?"
+  answer="El ESP32 está detrás de un firewall NAT en una red privada. NAT solo crea entradas de traducción para conexiones salientes, así que no hay ruta para que los paquetes entrantes lleguen al ESP32."
+/>
+
+## Qué hay en el relay de RoveLink
+
+El relay de RoveLink es un Cloudflare Worker — un programa pequeño que corre en la red edge de Cloudflare. Es accesible públicamente, siempre está encendido, y cualquier dispositivo en internet puede llegar a él.
+
+El relay usa **WebSockets**, no HTTP. Un WebSocket es una conexión persistente y bidireccional — como una llamada telefónica en vez de una serie de mensajes de texto. Tanto el navegador como el ESP32 abren su propia conexión WebSocket al relay, y el relay las conecta.
+
+El relay también usa **Durable Objects** — uno por robot — para recordar qué dispositivo y controlador están conectados actualmente, y para reenviar mensajes entre ellos.
+
+## takeaway
+
+El relay no es un intermediario que ralentiza las cosas — es la única razón por la que la conexión existe. Sin él, el navegador y el robot no pueden encontrarse en internet.
+
+## Explorar más
+
+- [Transporte del navegador](/network/browser-transport/) — cómo el navegador se conecta al relay
+- [Relay Worker](/network/relay-worker/) — qué hace el Cloudflare Worker
+- [RobotRoom](/network/robot-room/) — Durable Object por robot

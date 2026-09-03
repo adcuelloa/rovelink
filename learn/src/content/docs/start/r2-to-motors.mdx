@@ -39,3 +39,15 @@ Each stage above has its own lesson:
 - [Rhythm & Heartbeats](/control/rhythm-heartbeats/) — the timing rules
 - [Control Frames](/control/control-frames/) — the wire format
 - [Differential Drive](/control/differential-drive/) — from state to wheel math
+
+### Network & Relay
+
+The relay is how the browser reaches the robot across the internet:
+
+- [Why a Relay?](/network/why-relay/) — the NAT problem and why direct connections don't work
+- [Browser Transport](/network/browser-transport/) — how the browser connects to the relay
+- [Relay Worker](/network/relay-worker/) — the Cloudflare Worker that routes messages
+- [RobotRoom](/network/robot-room/) — per-robot Durable Object with presence detection
+- [The Protocol](/network/protocol/) — the JSON message format
+- [Authentication](/network/authentication/) — how tokens are verified
+- [Reconnection & Presence](/network/reconnection/) — backoff and staleness detection

@@ -1,0 +1,125 @@
+---
+title: The Protocol
+description: The JSON message types that browser, relay, and device speak — a versioned, typed envelope format.
+---
+
+import NetworkPath from '../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { ProtocolCompare } from '../../../components/network/ProtocolCompare.tsx';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="protocol" />
+
+Every message between browser, relay, and device follows the same format: a **versioned envelope** with a `type` discriminator. The protocol lives in `protocol/src/protocol.ts`.
+
+## The envelope
+
+Every message starts with:
+
+```json
+{ "v": 1, "type": "..." }
+```
+
+- `v` — protocol version (currently `1`). If the protocol changes, the version bumps. Old firmware keeps working because it can check `v` before processing.
+- `type` — which message this is. The rest of the fields depend on `type`.
+
+This is a **discriminated union** — the `type` field tells you exactly what shape the rest of the message has.
+
+<ProtocolCompare client:load />
+
+## Why version the protocol?
+
+The firmware runs on ESP32 hardware that can't always be updated. If the protocol changes, old firmware still needs to understand (or at least reject gracefully) new messages. The `v` field makes this possible.
+
+In practice, `v: 1` is the only version RoveLink has ever used. But the field is there for when it's needed.
+
+## Message types
+
+Here's the full taxonomy:
+
+### Registration (handshake)
+
+- `device.register` — robot announces itself
+- `controller.register` — browser requests control
+
+### Control (driving)
+
+- `control` — throttle, steering, gripper, armed state
+- `emergency-stop` — immediate halt, session-independent
+- `controller.session` — relay tells the device which session is active
+
+### Feedback
+
+- `telemetry` — device reports RSSI, state, last acked seq
+- `control.ack` — device confirms it applied a control frame
+- `emergency-stop.ack` — device confirms it applied an emergency stop
+
+### Presence
+
+- `room` — broadcast of who's online
+
+### Video
+
+- `controller.videoTicket.request` — browser requests a video ticket
+- `controller.videoTicket` — relay sends the ticket back
+
+### Ping
+
+- `ping` — browser measures round-trip time
+- `pong` — relay echoes the ping back
+
+## The ControlFrame
+
+The most important message is `control`. It carries:
+
+```json
+{
+  "v": 1,
+  "type": "control",
+  "seq": 42,
+  "sentAt": 1725400000000,
+  "ttlMs": 500,
+  "throttle": 0.72,
+  "steering": -0.18,
+  "gripper": "open",
+  "armed": true
+}
+```
+
+Key fields:
+
+- **`seq`** — sequence number. Higher always wins. Old frames with lower `seq` are discarded.
+- **`sentAt`** — the browser's clock when the frame was created.
+- **`ttlMs`** — time-to-live. After this many milliseconds, the robot ignores the frame.
+- **`throttle`/`steering`** — the driving intent, -1 to 1.
+- **`armed`** — whether motors are enabled.
+
+The `ttlMs` field is how the system detects stale commands — when no fresh frame arrives within the TTL window, the device stops. The full details of this "link watchdog" behavior are covered in the Safety module.
+
+<KnowledgeCheck
+  question="Why does the device use `controlSessionId` to reject old frames, instead of just checking `seq`?"
+  answer="Two different controllers can both have valid sequences (e.g., both at seq=1). The session ID distinguishes which controller the frame belongs to, preventing a delayed frame from an old session from being applied."
+/>
+
+## Validation
+
+The firmware validates every incoming message before acting on it:
+
+1. `v` must match `PROTOCOL_VERSION`
+2. `type` must be recognized
+3. Required fields must be present and the right type
+4. `controlSessionId` must match the active session
+
+If any check fails, the message is silently dropped. The firmware never trusts the other end — this layer is defense-first.
+
+## Key takeaway
+
+The protocol is a versioned, typed envelope format. Every message has `v` and `type`. The `control` frame carries throttle, steering, gripper, armed state, and a TTL that acts as a link watchdog.
+
+## Dive deeper
+
+- [RobotRoom](/network/robot-room/) — how the relay processes these messages
+- [Control Frames](/control/control-frames/) — how the browser builds control frames
+- [Authentication](/network/authentication/) — how tokens are verified

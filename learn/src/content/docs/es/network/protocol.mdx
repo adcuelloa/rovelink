@@ -1,0 +1,125 @@
+---
+title: El Protocolo
+description: Los tipos de mensajes JSON que hablan navegador, relay y dispositivo — un formato de envelope versionado y tipado.
+---
+
+import NetworkPath from '../../../../components/shared/NetworkPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { ProtocolCompare } from '../../../../components/network/ProtocolCompare.tsx';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Network & Relay</Eyebrow>
+
+<NetworkPath current="protocol" />
+
+Cada mensaje entre navegador, relay y dispositivo sigue el mismo formato: un **envelope versionado** con un discriminador `type`. El protocolo vive en `protocol/src/protocol.ts`.
+
+## El envelope
+
+Todo mensaje empieza con:
+
+```json
+{ "v": 1, "type": "..." }
+```
+
+- `v` — versión del protocolo (actualmente `1`). Si el protocolo cambia, la versión sube. El firmware viejo sigue funcionando porque puede revisar `v` antes de procesar.
+- `type` — qué mensaje es. El resto de los campos depende de `type`.
+
+Esto es un **discriminated union** — el campo `type` te dice exactamente qué forma tiene el resto del mensaje.
+
+<ProtocolCompare client:load />
+
+## ¿Por qué versionar el protocolo?
+
+El firmware corre en hardware ESP32 que no siempre se puede actualizar. Si el protocolo cambia, el firmware viejo necesita entender (o al menos rechazar elegantemente) mensajes nuevos. El campo `v` hace esto posible.
+
+En la práctica, `v: 1` es la única versión que RoveLink ha usado. Pero el campo está ahí para cuando se necesite.
+
+## Tipos de mensajes
+
+Aquí está la taxonomía completa:
+
+### Registro (handshake)
+
+- `device.register` — el robot se anuncia
+- `controller.register` — el navegador pide control
+
+### Control (conducción)
+
+- `control` — throttle, steering, gripper, estado armed
+- `emergency-stop` — parada inmediata, independiente de sesión
+- `controller.session` — el relay le dice al dispositivo qué sesión está activa
+
+### Feedback
+
+- `telemetry` — el dispositivo reporta RSSI, estado, último seq confirmado
+- `control.ack` — el dispositivo confirma que aplicó un control frame
+- `emergency-stop.ack` — el dispositivo confirma que aplicó un emergency stop
+
+### Presencia
+
+- `room` — broadcast de quién está online
+
+### Video
+
+- `controller.videoTicket.request` — el navegador pide un ticket de video
+- `controller.videoTicket` — el relay envía el ticket
+
+### Ping
+
+- `ping` — el navegador mide el tiempo de ida y vuelta
+- `pong` — el relay devuelve el ping
+
+## El ControlFrame
+
+El mensaje más importante es `control`. Lleva:
+
+```json
+{
+  "v": 1,
+  "type": "control",
+  "seq": 42,
+  "sentAt": 1725400000000,
+  "ttlMs": 500,
+  "throttle": 0.72,
+  "steering": -0.18,
+  "gripper": "open",
+  "armed": true
+}
+```
+
+Campos clave:
+
+- **`seq`** — número de secuencia. Mayor siempre gana. Frames viejos con `seq` menor se descartan.
+- **`sentAt`** — el reloj del navegador cuando se creó el frame.
+- **`ttlMs`** — tiempo de vida. Después de esta cantidad de milisegundos, el robot ignora el frame.
+- **`throttle`/`steering`** — la intención de conducción, -1 a 1.
+- **`armed`** — si los motores están habilitados.
+
+El campo `ttlMs` es cómo el sistema detecta comandos obsoletos — cuando no llega un frame nuevo dentro de la ventana TTL, el dispositivo se detiene. Los detalles completos de este comportamiento de "watchdog del enlace" se cubren en el módulo de Seguridad.
+
+<KnowledgeCheck
+  question="¿Por qué el dispositivo usa `controlSessionId` para rechazar frames viejos, en vez de solo verificar `seq`?"
+  answer="Dos controladores diferentes pueden tener secuencias válidas (ambos en seq=1). El session ID distingue a qué controlador pertenece el frame, evitando que un frame retrasado de una sesión vieja sea aplicado."
+/>
+
+## Validación
+
+El firmware valida cada mensaje entrante antes de actuar:
+
+1. `v` debe coincidir con `PROTOCOL_VERSION`
+2. `type` debe ser reconocido
+3. Los campos requeridos deben estar presentes y ser del tipo correcto
+4. `controlSessionId` debe coincidir con la sesión activa
+
+Si falla alguna verificación, el mensaje se descarta silenciosamente. El firmware nunca confía en el otro lado — esta capa es defensa primero.
+
+## takeaway
+
+El protocolo es un formato de envelope versionado y tipado. Todo mensaje tiene `v` y `type`. El frame `control` lleva throttle, steering, gripper, estado armed, y un TTL que actúa como watchdog del enlace.
+
+## Explorar más
+
+- [RobotRoom](/network/robot-room/) — cómo el relay procesa estos mensajes
+- [Control Frames](/control/control-frames/) — cómo el navegador construye control frames
+- [Autenticación](/network/authentication/) — cómo se verifican los tokens
