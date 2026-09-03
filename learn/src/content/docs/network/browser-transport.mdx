@@ -62,20 +62,18 @@ RTT = `echoAt - sentAt` = 50ms. No synchronized clocks needed — the pong echoe
 Connections drop. WiFi stutters, the laptop goes to sleep, the relay restarts. When the WebSocket closes:
 
 1. The transport clears its state
-2. It waits a **backoff** period (starts at 1s, doubles each time, maxes at 30s)
+2. It waits a **fixed delay** (currently 1.5s)
 3. It opens a new connection
-4. On success, it resets the backoff to 1s
+4. If it still can't connect, it waits the same delay and tries again
 
-This is **bounded exponential backoff** — it tries quickly at first, then slows down to avoid flooding the relay with reconnection attempts.
+RoveLink doesn't spin in a tight reconnect loop. It pauses between attempts — long enough to avoid hammering the relay, short enough to recover quickly.
 
 ```
-attempt 1: wait 1s  → reconnect
-attempt 2: wait 2s  → reconnect
-attempt 3: wait 4s  → reconnect
-attempt 4: wait 8s  → reconnect
-attempt 5: wait 16s → reconnect
-attempt 6: wait 30s → reconnect (capped)
+t=0s:     connection drops
+t=1.5s:   reconnect attempt 1 (succeeds) → resume
 ```
+
+Other systems use **bounded exponential backoff** — starting with a short delay and doubling it after each failure. That pattern makes sense when outages can last minutes and you want to back off aggressively. RoveLink's control transport doesn't need that: control sessions are short-lived, and a fixed delay keeps reconnection predictable.
 
 ## The transport API
 
@@ -93,8 +91,8 @@ interface Transport {
 Events include `device-activity` (something came from the robot) and `relay-rtt` (a new RTT measurement).
 
 <KnowledgeCheck
-  question="Why does the transport use bounded exponential backoff instead of reconnecting immediately?"
-  answer="Immediate reconnection would flood the relay with connection attempts during a long outage. Backoff starts at 1s and doubles to 30s, reducing load while still reconnecting reasonably quickly."
+  question="Why does the transport wait before reconnecting instead of retrying immediately?"
+  answer="Immediate reconnection would create a tight loop that hammers the relay. The fixed 1.5s delay gives the network and the relay time between attempts while still recovering quickly."
 />
 
 ## What the transport doesn't know
@@ -110,7 +108,7 @@ It only knows about messages on the wire. This separation means you could swap t
 
 ## Key takeaway
 
-WebSocketTransport is the browser's communication layer. It opens a WebSocket to the relay, sends and receives JSON messages, and reconnects with exponential backoff when the connection drops.
+WebSocketTransport is the browser's communication layer. It opens a WebSocket to the relay, sends and receives JSON messages, and reconnects with a fixed delay when the connection drops.
 
 ## Dive deeper
 

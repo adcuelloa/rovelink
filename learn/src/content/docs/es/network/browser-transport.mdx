@@ -62,20 +62,18 @@ RTT = `echoAt - sentAt` = 50ms. No necesita relojes sincronizados — el pong de
 Las conexiones caen. El WiFi tropieza, la laptop se duerme, el relay se reinicia. Cuando el WebSocket se cierra:
 
 1. El transporte limpia su estado
-2. Espera un período de **backoff** (empieza en 1s, se duplica cada vez, máximo 30s)
+2. Espera un **intervalo fijo** (actualmente 1.5s)
 3. Abre una nueva conexión
-4. Al tener éxito, resetea el backoff a 1s
+4. Si aún no puede conectar, espera el mismo intervalo y vuelve a intentar
 
-Esto es **backoff exponencial acotado** — intenta rápido al principio, luego se ralentiza para evitar saturar el relay con intentos de reconexión.
+RoveLink no entra en un bucle de reconexión apretado. Hace una pausa entre intentos — lo suficiente para no saturar el relay, y lo bastante breve para recuperarse rápido.
 
 ```
-intento 1: esperar 1s  → reconectar
-intento 2: esperar 2s  → reconectar
-intento 3: esperar 4s  → reconectar
-intento 4: esperar 8s  → reconectar
-intento 5: esperar 16s → reconectar
-intento 6: esperar 30s → reconectar (tope)
+t=0s:     la conexión cae
+t=1.5s:   intento de reconexión 1 (tiene éxito) → reanudar
 ```
+
+Otros sistemas usan **backoff exponencial acotado** — empezando con un delay corto y duplicándolo tras cada fallo. Ese patrón tiene sentido cuando las interrupciones pueden durar minutos y queremos reducir la agresividad. El transporte de control de RoveLink no lo necesita: las sesiones de control son de corta vida, y un delay fijo mantiene la reconexión predecible.
 
 ## La API del transporte
 
@@ -93,8 +91,8 @@ interface Transport {
 Los eventos incluyen `device-activity` (algo llegó del robot) y `relay-rtt` (una nueva medición de RTT).
 
 <KnowledgeCheck
-  question="¿Por qué el transporte usa backoff exponencial acotado en vez de reconectar inmediatamente?"
-  answer="La reconexión inmediata saturaría el relay con intentos de conexión durante una interrupción prolongada. El backoff empieza en 1s y se duplica hasta 30s, reduciendo la carga mientras sigue reconectando razonablemente rápido."
+  question="¿Por qué el transporte espera antes de reconectar en vez de reintentar inmediatamente?"
+  answer="La reconexión inmediata crearía un bucle apretado que saturaría el relay. El intervalo fijo de 1.5s le da tiempo a la red y al relay entre intentos mientras se recupera rápido."
 />
 
 ## Qué no sabe el transporte
@@ -110,7 +108,7 @@ Solo conoce mensajes en la red. Esta separación significa que podrías cambiar 
 
 ## takeaway
 
-WebSocketTransport es la capa de comunicación del navegador. Abre un WebSocket al relay, envía y recibe mensajes JSON, y reconecta con backoff exponencial cuando la conexión cae.
+WebSocketTransport es la capa de comunicación del navegador. Abre un WebSocket al relay, envía y recibe mensajes JSON, y reconecta con un delay fijo cuando la conexión cae.
 
 ## Explorar más
 
