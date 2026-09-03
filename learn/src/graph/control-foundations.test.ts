@@ -38,20 +38,14 @@ async function readMdx(dir: string, slug: string): Promise<string> {
 test('every English control lesson has a Spanish counterpart', async () => {
   const esFiles = (await mdxFiles(CONTROL_ES)).map((f) => f.replace('.mdx', ''));
   for (const slug of CONTROL_SLUGS) {
-    assert.ok(
-      esFiles.includes(slug),
-      `Missing Spanish translation for control/${slug}`,
-    );
+    assert.ok(esFiles.includes(slug), `Missing Spanish translation for control/${slug}`);
   }
 });
 
 test('every Spanish control lesson has an English counterpart', async () => {
   const enFiles = (await mdxFiles(CONTROL_EN)).map((f) => f.replace('.mdx', ''));
   for (const slug of CONTROL_SLUGS) {
-    assert.ok(
-      enFiles.includes(slug),
-      `Missing English source for es/control/${slug}`,
-    );
+    assert.ok(enFiles.includes(slug), `Missing English source for es/control/${slug}`);
   }
 });
 
@@ -76,20 +70,14 @@ test('every EN control lesson imports PipelinePosition', async () => {
 test('every EN control lesson imports Eyebrow', async () => {
   for (const slug of CONTROL_SLUGS) {
     const content = await readMdx(CONTROL_EN, slug);
-    assert.ok(
-      content.includes('Eyebrow'),
-      `control/${slug} missing Eyebrow import`,
-    );
+    assert.ok(content.includes('Eyebrow'), `control/${slug} missing Eyebrow import`);
   }
 });
 
 test('every EN control lesson has at least one KnowledgeCheck', async () => {
   for (const slug of CONTROL_SLUGS) {
     const content = await readMdx(CONTROL_EN, slug);
-    assert.ok(
-      content.includes('KnowledgeCheck'),
-      `control/${slug} missing KnowledgeCheck`,
-    );
+    assert.ok(content.includes('KnowledgeCheck'), `control/${slug} missing KnowledgeCheck`);
   }
 });
 
@@ -97,10 +85,7 @@ test('every EN control lesson has educational structure', async () => {
   for (const slug of CONTROL_SLUGS) {
     const content = await readMdx(CONTROL_EN, slug);
     // Must have at least one heading
-    assert.ok(
-      content.includes('## '),
-      `control/${slug} missing section headings`,
-    );
+    assert.ok(content.includes('## '), `control/${slug} missing section headings`);
     // Must reference the pipeline or a source file
     assert.ok(
       content.includes('PipelinePosition') ||
@@ -132,10 +117,7 @@ test('all learnSlug concepts reference valid source files', async () => {
     if (!concept.learnSlug) continue;
     if (!concept.sourceRefs) continue;
     for (const ref of concept.sourceRefs) {
-      assert.ok(
-        ref.path.length > 0,
-        `Concept "${concept.id}" has empty sourceRef path`,
-      );
+      assert.ok(ref.path.length > 0, `Concept "${concept.id}" has empty sourceRef path`);
       assert.ok(
         ref.kind === 'source' || ref.kind === 'test',
         `Concept "${concept.id}" has invalid sourceRef kind: ${ref.kind}`,
