@@ -1,0 +1,108 @@
+---
+title: ControlSender
+description: Cuándo el estado deseado del navegador realmente sale por la red.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="sender" />
+
+## El problema
+
+¿Por qué no enviamos un paquete de WebSocket cada vez que se ejecuta JavaScript?
+
+El navegador se actualiza a 60fps. El control engine recalcula en cada evento de entrada — una tecla presionada, un tick del joystick, un muestreo del gamepad. Eso significa que el engine podría cambiar de estado cientos de veces por segundo. Pero enviar un paquete por cada cambio inundaría la red con datos redundantes.
+
+Imaginá sostener un gamepad firme al 50% de throttle. El engine resuelve el mismo valor en cada ciclo de muestreo. Enviar 30 frames casi idénticos por segundo al robot desperdicia ancho de banda y hace más difícil razonar sobre el enlace. El firmware no necesita saber que sostuviste la palanca quieta treinta veces — necesita saber que seguís ahí y que la palanca sigue al 50%.
+
+## La idea
+
+**ControlEngine** = lo que queremos que el robot haga ahora.
+
+**ControlSender** = _cuándo_ ese estado deseado debería salir por la red.
+
+Esta separación es crítica. El engine no decide el temporizado. El sender no decide la intención. Cada uno hace un trabajo bien, y juntos producen un flujo de frames que es tanto responsive como eficiente.
+
+## Cómo funciona
+
+ControlSender envuelve la función de ritmo `decideSend()` contra un `RobotTransport`. Su API es pequeña y enfocada:
+
+- **`start(readState)`** — inicia un `setInterval` a `heartbeatMs` que muestrea el control engine. Cada 150ms, el sender lee el estado actual y le pregunta al ritmo: ¿debería enviar?
+- **`update(state)`** — se llama cuando el estado del engine cambia. Invoca `decideSend()` inmediatamente en vez de esperar al próximo tick del heartbeat. Solo envía si la decisión no es `skip`.
+- **`reset()`** — limpia la baseline del ritmo. Se usa al reconectar para que el primer frame después de reconectar se envíe inmediatamente, sin esperar la ventana de rate-limited.
+- **`emergencyStop()`** — envía un frame de e-stop directamente, saltándose toda la lógica de ritmo. Sin throttle, sin skip — el frame sale ahora.
+- **`establishSessionBaseline()`** — envío incondicional único de `SAFE_STATE`. Se llama una vez después de que el relay entrega `controller.session` para establecer la baseline desarmada que el firmware necesita antes de aceptar cualquier frame armado.
+
+## El ciclo de update
+
+Cada `heartbeatMs` (150ms), el sender lee el estado actual del engine y pregunta: "¿debería enviar esto?"
+
+La función de ritmo devuelve una de cuatro decisiones:
+
+| Decisión    | Significado                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `immediate` | Enviar ahora, sin esperar                                                                      |
+| `rate`      | Cambio significativo, pero con throttle — solo si pasó suficiente tiempo desde el último envío |
+| `heartbeat` | Estado estable, pero re-enviar para mantener alimentado el watchdog TTL del firmware           |
+| `skip`      | No enviar — o no cambió nada, o estamos rate-limited y es muy pronto                           |
+
+Si la decisión no es `skip`, el sender codifica el estado en un `ControlFrame` y lo envía por el transport. Si es `skip`, no pasa nada — el sender espera al próximo tick del heartbeat o a la próxima llamada a `update()`.
+
+## Establecer baseline de sesión
+
+Al reconectar, después de que el relay envía `controller.session`, el sender llama inmediatamente a `establishSessionBaseline()`. Esto envía `SAFE_STATE` incondicionalmente — sin chequeo de ritmo, sin rate limit, sin skip.
+
+¿Por qué? El firmware requiere una baseline desarmada antes de aceptar cualquier frame armado. Si el navegador reconecta y de inmediato envía un comando de velocidad total hacia adelante, el firmware lo rechazaría porque no ha visto el estado seguro para esta nueva sesión.
+
+Después de este envío único, el ritmo normal se reanuda. El timer del heartbeat empieza a contar, y el sender vuelve a su ciclo de decisión estándar.
+
+## Parada de emergencia
+
+`emergencyStop()` se salta toda la lógica de ritmo. Resetea el estado interno del sender y envía el frame de e-stop por el transport inmediatamente.
+
+Esto es intencional. Nunca querés aplicar rate-limit o heartbeat-delay a un frame crítico para la seguridad. Si el operador aprieta la parada de emergencia, ese frame debe salir ahora — no en el próximo tick del heartbeat, no después de una ventana de rate-limit, sino inmediatamente.
+
+## Idea clave
+
+El sender no conoce la red. No conoce WebSocket, relay, o firmware. Solo conoce dos cosas: acá está el estado actual, y acá está la regla de ritmo.
+
+Esto lo hace testeable de forma independiente. Podés verificar cada decisión — immediate, rate, heartbeat, skip — sin levantar una conexión WebSocket o simular latencia de red. El sender es una capa pura de decisión con un slot de transport, nada más.
+
+## Qué viene antes
+
+ControlEngine mantiene el estado deseado actual. Resuelve la entrada en un comando del robot y lo almacena. El sender lee del engine pero no es dueño del estado.
+
+## Qué viene después
+
+La capa de transporte — típicamente un WebSocket — codifica el estado en un `ControlFrame` y lo pone en el cable. El sender le entrega un frame al transport; el transport se encarga del resto.
+
+---
+
+<KnowledgeCheck
+  question="¿Por qué existe ControlSender como una clase separada de ControlEngine?"
+  answer="Separación de responsabilidades — el Engine sabe QUÉ debe hacer el robot, el Sender sabe CUÁNDO decirlo. Esto evita envíos redundantes y habilita optimización basada en ritmo. El engine puede recalcular libremente sin disparar tráfico de red; solo el sender decide cuándo el cable necesita actualización."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Qué pasa al reconectar?"
+  answer="reset() limpia la baseline del ritmo para que el primer estado después de reconectar se envíe inmediatamente, sin esperar la próxima ventana rate-limited. Después establishSessionBaseline() envía SAFE_STATE incondicionalmente para darle al firmware la baseline desarmada que necesita antes de aceptar frames armados. Después de eso, la lógica normal de heartbeat y rate-limiting toma el control."
+/>
+
+---
+
+### Evidencia del código fuente
+
+- `sender.ts` — Clase `ControlSender`, `establishSessionBaseline()`, `emergencyStop()`, despacho de decisión `update()`
+- `sender.test.ts` — cobertura de decisiones de ritmo, comportamiento de baseline al reconectar, tests de bypass de e-stop
+
+---
+
+### Siguiente
+
+**Ritmo y heartbeats** — El sender le pregunta a `decideSend()` por una decisión. Acá está cómo funciona esa decisión.

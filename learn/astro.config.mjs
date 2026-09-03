@@ -59,6 +59,52 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Control',
+          translations: { es: 'Control' },
+          items: [
+            {
+              label: 'Browser Input',
+              translations: { es: 'Entrada del navegador' },
+              slug: 'control/browser-input',
+            },
+            {
+              label: 'Input Ownership',
+              translations: { es: 'Control de entrada' },
+              slug: 'control/input-ownership',
+            },
+            {
+              label: 'Controller Profiles',
+              translations: { es: 'Perfiles del controlador' },
+              slug: 'control/controller-profiles',
+            },
+            {
+              label: 'ControlEngine',
+              translations: { es: 'ControlEngine' },
+              slug: 'control/control-engine',
+            },
+            {
+              label: 'ControlSender',
+              translations: { es: 'ControlSender' },
+              slug: 'control/control-sender',
+            },
+            {
+              label: 'Rhythm & Heartbeats',
+              translations: { es: 'Ritmo y heartbeats' },
+              slug: 'control/rhythm-heartbeats',
+            },
+            {
+              label: 'Control Frames',
+              translations: { es: 'Control Frames' },
+              slug: 'control/control-frames',
+            },
+            {
+              label: 'Differential Drive',
+              translations: { es: 'Tracción diferencial' },
+              slug: 'control/differential-drive',
+            },
+          ],
+        },
+        {
           label: 'Labs',
           translations: { es: 'Laboratorios' },
           items: [
@@ -68,8 +114,8 @@ export default defineConfig({
               slug: 'labs/control-pipeline',
             },
             {
-              label: 'Differential Drive',
-              translations: { es: 'Tracción diferencial' },
+              label: 'Differential Drive Lab',
+              translations: { es: 'Laboratorio de tracción diferencial' },
               slug: 'labs/differential-drive',
             },
           ],

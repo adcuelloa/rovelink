@@ -1,0 +1,108 @@
+---
+/**
+ * Compact pipeline position indicator. Shows the full control pipeline
+ * with the current concept highlighted and links to adjacent concepts.
+ * Stages are defined statically here to keep the component self-contained.
+ */
+interface Props {
+  readonly current: string;
+  readonly labels?: Record<string, string>;
+}
+
+const stages = [
+  { id: 'input', label: 'INPUT', slug: 'control/browser-input' },
+  { id: 'ownership', label: 'OWNERSHIP', slug: 'control/input-ownership' },
+  { id: 'profile', label: 'PROFILE', slug: 'control/controller-profiles' },
+  { id: 'engine', label: 'ENGINE', slug: 'control/control-engine' },
+  { id: 'sender', label: 'SENDER', slug: 'control/control-sender' },
+  { id: 'rhythm', label: 'RHYTHM', slug: 'control/rhythm-heartbeats' },
+  { id: 'frame', label: 'FRAME', slug: 'control/control-frames' },
+  { id: 'mix', label: 'MIX', slug: 'control/differential-drive' },
+];
+
+const { current, labels } = Astro.props;
+const resolvedLabels = labels ?? {};
+---
+
+<nav class="rl-pipeline" aria-label="Control pipeline position">
+  <ol class="rl-pipeline__list">
+    {stages.map((stage, i) => {
+      const isActive = stage.id === current;
+      const displayName = resolvedLabels[stage.id] ?? stage.label;
+      return (
+        <li class:list={['rl-pipeline__step', { 'rl-pipeline__step--active': isActive }]}>
+          {i > 0 && <span class="rl-pipeline__arrow" aria-hidden="true">&rarr;</span>}
+          {isActive ? (
+            <span class="rl-pipeline__current" aria-current="step">{displayName}</span>
+          ) : (
+            <a class="rl-pipeline__link" href={`/${stage.slug}/`}>{displayName}</a>
+          )}
+        </li>
+      );
+    })}
+  </ol>
+</nav>
+
+<style>
+  .rl-pipeline {
+    font-family: var(--rl-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--rl-border, #ccc);
+    border-radius: var(--rl-radius-sm, 4px);
+    background: var(--rl-surface-raised, #fff);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 1.5rem;
+  }
+  .rl-pipeline__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rl-pipeline__step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    white-space: nowrap;
+  }
+  .rl-pipeline__arrow {
+    opacity: 0.35;
+    font-size: 0.8em;
+  }
+  .rl-pipeline__link {
+    color: var(--rl-text-dim, #666);
+    text-decoration: none;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .rl-pipeline__link:hover {
+    color: var(--rl-accent, #ff8a1e);
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.12));
+  }
+  .rl-pipeline__current {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    background: var(--rl-accent, #ff8a1e);
+    color: #1a1300;
+    font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .rl-pipeline {
+      font-size: 0.62rem;
+      padding: 0.5rem 0.6rem;
+    }
+    .rl-pipeline__link,
+    .rl-pipeline__current {
+      padding: 0.12rem 0.25rem;
+    }
+  }
+</style>

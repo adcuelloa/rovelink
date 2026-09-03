@@ -1,0 +1,174 @@
+---
+title: Rhythm & Heartbeats
+description: The timing rules that keep the robot responsive without flooding the network.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="rhythm" />
+
+## The problem
+
+Two extremes are both bad.
+
+Send continuously and you waste bandwidth, make the link harder to reason about, and risk overwhelming the firmware with redundant frames. Send only on state change and the robot doesn't know you're still there if you hold the stick still.
+
+Consider a gamestick held at a fixed position. The engine resolves the same values hundreds of times per second. Sending every resolution is wasteful. But if you send _nothing_ while holding the stick, the firmware's TTL watchdog starts counting down — and if it hits zero, the robot assumes control is lost and stops.
+
+The robot needs periodic proof that control is alive. The operator needs low-latency response when input changes. These two requirements pull in opposite directions, and the rhythm function exists to reconcile them.
+
+## The idea
+
+A rhythm with four modes: **immediate**, **rate**, **heartbeat**, and **skip**.
+
+Each mode answers a different question about the current state, and together they produce a frame stream that is both responsive and efficient. The rhythm function is a pure decision — it takes the current and previous states, applies a few rules, and returns a verdict. No timers, no side effects, no network knowledge.
+
+## The four decisions
+
+### Immediate — send right now
+
+Some situations cannot wait for a rate-limit window or a heartbeat tick:
+
+- **First send ever** — `previous === null`. There's no baseline to compare against, so send immediately.
+- **Armed toggled** — arm or disarm. The firmware must know about this transition instantly.
+- **Gripper changed** — gripper state is binary and action-critical. Delay is unacceptable.
+- **Moving to idle** — was moving, now stopped. The braking transition needs immediate delivery.
+
+Immediate means exactly what it sounds like: the frame goes out on the wire now, no matter what.
+
+### Rate — significant change, throttled
+
+When an axis changes significantly but the last send was recent, rate-limiting kicks in:
+
+- **Significant change** — axis moved by more than `threshold` (0.02, or 2% of full range).
+- **Rate budget available** — enough time has passed: `sinceLastMs >= 1000 / hzMax`.
+
+With `hzMax = 30`, the minimum time between movement packets is 33.3ms. If the axis moved significantly but the last frame went out 10ms ago, the sender skips this update and waits for the next rate window. This prevents flooding the wire with micro-adjustments while still capturing meaningful input changes.
+
+### Heartbeat — keep the link alive
+
+Nothing changed, but the robot must still know control is active:
+
+- State is **armed but steady** — stick held still, no transitions.
+- Re-sent every `heartbeatMs` = 150ms.
+- This feeds the firmware's TTL watchdog, proving the operator is still connected.
+
+The heartbeat is the quiet pulse of the control link. It doesn't carry new intent — it carries proof of continued presence.
+
+### Skip — don't send
+
+Some situations justify silence:
+
+- **Disarmed and idle** — no point sending "nothing is happening." The next arm or input event will trigger an immediate send.
+- **Rate-limited and too soon** — significant change detected, but the rate budget hasn't replenished. Wait for the next window.
+- **Heartbeat not yet due** — state is steady and armed, but less than 150ms since the last send.
+
+Skip is the default. Most of the time, the rhythm says "stay quiet" — and that's the right call.
+
+## Constants
+
+From `rhythm.ts`:
+
+```
+hzMax: 30        → 33.3ms minimum between movement packets
+heartbeatMs: 150 → period for re-sending steady state
+threshold: 0.02  → minimum axis change to justify a packet
+```
+
+These values are tuned for the real protocol. `hzMax` matches the firmware's expected frame rate. `heartbeatMs` sits well below the firmware's 500ms TTL watchdog. `threshold` filters out noise from analog stick jitter.
+
+## Visual timeline
+
+```
+0ms      input changes → SEND (immediate)
+33ms     another tiny change → rate-limited (too soon, skip)
+50ms     same state, armed → heartbeat not yet (skip)
+150ms    same state, still armed → HEARTBEAT
+183ms    another tiny change → rate-limited (33ms passed, SEND)
+300ms    same state, armed → HEARTBEAT
+...
+```
+
+The pattern is clear: bursts of immediate sends on transitions, throttled sends during sustained movement, and quiet heartbeats when nothing changes. The rhythm adapts to the operator's behavior in real time.
+
+## Why heartbeat exists
+
+The firmware has a TTL watchdog (`CONTROL_TTL_MS = 500ms`). If no valid frame arrives within 500ms, the robot assumes control is lost and stops.
+
+The heartbeat at 150ms provides plenty of margin. Three heartbeats fit in 450ms — that's 50ms of headroom before the watchdog trips. Even if two consecutive heartbeats are dropped by network jitter, the third arrives in time.
+
+This margin is deliberate. Ordinary network conditions — Wi-Fi retransmits, router queuing, browser scheduler delays — can easily add 50-100ms of jitter. The heartbeat frequency keeps the link safe under normal conditions while staying well below the bandwidth cost of continuous sending.
+
+## The margin
+
+`heartbeatMs` (150ms) must stay well below `CONTROL_TTL_MS` (500ms).
+
+If `heartbeatMs` were 600ms, ordinary network jitter could trip the watchdog. A single delayed heartbeat would push the gap past 500ms, and the robot would stop even though the operator is still actively driving. The current ratio — 150ms heartbeat vs 500ms TTL — gives a 3:1 margin that handles real-world network conditions gracefully.
+
+## Disarmed + idle skip
+
+When disarmed and not moving, the sender skips entirely. No bandwidth wasted on "nothing is happening."
+
+This is the quiet state. The operator hasn't armed the robot, hasn't touched the sticks, isn't sending commands. The firmware's TTL watchdog isn't running because no session is armed. There's nothing to prove, nothing to send.
+
+The next arm command or input event triggers an immediate send, and the rhythm cycle begins again.
+
+## The decision function
+
+Here's the actual `decideSend()` flow:
+
+```
+if previous === null       → immediate   (first send, no baseline)
+if armed changed           → immediate   (arm/disarm is critical)
+if gripper changed         → immediate   (gripper action is binary)
+if was moving, now idle    → immediate   (braking transition)
+if significant change
+  AND rate budget          → rate        (throttled send)
+if significant change
+  BUT rate budget exceeded → skip        (wait for next window)
+if disarmed AND idle       → skip        (nothing to send)
+if heartbeat interval
+  elapsed                  → heartbeat   (keep watchdog fed)
+else                       → skip        (default: stay quiet)
+```
+
+The order matters. Immediate checks come first — they always win. Rate checks come next. Heartbeat is the fallback for steady armed state. Skip is the final else.
+
+This ordering guarantees that safety-critical transitions are never delayed by rate limiting or heartbeat timing. If the arm state changes, the frame goes out immediately — period.
+
+## Connection to the firmware
+
+The heartbeat exists because the robot must keep receiving evidence that control is still alive. The firmware uses those repeated valid frames to decide whether control is active. We'll cover the full TTL mechanism in [Connection Safety](/labs/ttl/).
+
+The key insight: the heartbeat is not about sending new information. It's about proving that old information is still valid. "I still want 50% throttle" is the message, and the rhythm ensures the firmware never goes long enough without hearing it.
+
+---
+
+<KnowledgeCheck
+  question="Why does RoveLink still send frames if the stick has not moved?"
+  answer="The heartbeat keeps the firmware's TTL watchdog fed. Without periodic re-sends, the robot would assume control is lost and stop, even though the operator is still actively driving. The heartbeat at 150ms proves continued presence well within the firmware's 500ms TTL window."
+/>
+
+---
+
+<KnowledgeCheck
+  question="What is the minimum time between two movement packets?"
+  answer="1000 / 30 ≈ 33.3ms, controlled by hzMax = 30. This prevents flooding the wire with micro-adjustments from analog stick jitter while still capturing meaningful input changes at a rate the firmware can process."
+/>
+
+---
+
+### Source evidence
+
+- `rhythm.ts` — `decideSend()`, `DEFAULT_RHYTHM` constants (`hzMax`, `heartbeatMs`, `threshold`)
+- `rhythm.test.ts` — decision coverage for immediate, rate, heartbeat, skip paths
+
+---
+
+### Up next
+
+**Control Frames** — The sender decides to send. What does the actual message look like?

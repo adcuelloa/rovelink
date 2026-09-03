@@ -1,0 +1,108 @@
+---
+title: ControlSender
+description: When the browser's desired state actually goes onto the network.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="sender" />
+
+## The problem
+
+Why don't we send a WebSocket packet every time JavaScript runs?
+
+The browser updates at 60fps. The control engine recalculates on every input event — a key press, a joystick tick, a gamepad poll. That means the engine might change state hundreds of times per second. But sending a packet for every single change would flood the network with redundant data.
+
+Imagine holding a gamestick steady at 50% throttle. The engine resolves that same value on every poll cycle. Sending 30 nearly-identical frames per second to the robot wastes bandwidth and makes the link harder to reason about. The firmware doesn't need to know you held the stick still thirty times — it needs to know you're still there and the stick is still at 50%.
+
+## The idea
+
+**ControlEngine** = what we currently want the robot to do.
+
+**ControlSender** = _when_ that desired state should go onto the network.
+
+This separation is critical. The engine doesn't decide timing. The sender doesn't decide intent. Each does one job well, and together they produce a stream of frames that is both responsive and efficient.
+
+## How it works
+
+ControlSender wraps the `decideSend()` rhythm function against a `RobotTransport`. Its API is small and focused:
+
+- **`start(readState)`** — kicks off a `setInterval` at `heartbeatMs` that polls the control engine. Every 150ms, the sender reads the current state and asks the rhythm: should I send?
+- **`update(state)`** — called whenever the engine's state changes. It invokes `decideSend()` immediately rather than waiting for the next heartbeat tick. Only sends if the decision is not `skip`.
+- **`reset()`** — clears the rhythm baseline. Used on reconnect so the very first frame after reconnecting is sent immediately, without waiting for the rate-limited window.
+- **`emergencyStop()`** — sends an e-stop frame directly, bypassing all rhythm logic. No throttling, no skipping — the frame goes out now.
+- **`establishSessionBaseline()`** — one-shot unconditional `SAFE_STATE` send. Called once after the relay delivers `controller.session` to establish the disarmed baseline the firmware requires before any armed frame is accepted.
+
+## The update cycle
+
+Every `heartbeatMs` (150ms), the sender reads the current engine state and asks: "should I send this?"
+
+The rhythm function returns one of four decisions:
+
+| Decision    | Meaning                                                                                |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `immediate` | Send right now, no waiting                                                             |
+| `rate`      | Significant change, but throttled — only if enough time has passed since the last send |
+| `heartbeat` | State is steady, but re-send to keep the firmware's TTL watchdog fed                   |
+| `skip`      | Don't send — either nothing changed, or we're rate-limited and it's too soon           |
+
+If the decision is anything other than `skip`, the sender encodes the state into a `ControlFrame` and pushes it through the transport. If it's `skip`, nothing happens — the sender waits for the next heartbeat tick or the next `update()` call.
+
+## Establish session baseline
+
+On reconnect, after the relay sends `controller.session`, the sender immediately calls `establishSessionBaseline()`. This sends `SAFE_STATE` unconditionally — no rhythm check, no rate limit, no skip.
+
+Why? The firmware requires a disarmed baseline before it will accept any armed frame. If the browser reconnects and immediately sends a full-speed forward command, the firmware would reject it because it hasn't seen the safe state for this new session.
+
+After this one-shot send, normal rhythm resumes. The heartbeat timer starts ticking, and the sender reverts to its standard decision cycle.
+
+## Emergency stop
+
+`emergencyStop()` bypasses all rhythm logic. It resets the sender's internal state and sends the e-stop frame through the transport immediately.
+
+This is intentional. You never want to rate-limit or heartbeat-delay a safety-critical frame. If the operator hits the emergency stop, that frame must go out now — not on the next heartbeat tick, not after a rate-limit window, but immediately.
+
+## Key insight
+
+The sender doesn't know about the network. It doesn't know about WebSocket, relay, or firmware. It only knows two things: here is the current state, and here is the rhythm rule.
+
+This makes it independently testable. You can verify every decision — immediate, rate, heartbeat, skip — without spinning up a WebSocket connection or simulating network latency. The sender is a pure decision layer with a transport slot, nothing more.
+
+## What comes before
+
+ControlEngine holds the current desired state. It resolves input into a robot command and stores it. The sender reads from the engine but doesn't own the state.
+
+## What comes after
+
+The transport layer — typically a WebSocket — encodes the state into a `ControlFrame` and puts it on the wire. The sender hands the transport a frame; the transport handles the rest.
+
+---
+
+<KnowledgeCheck
+  question="Why does ControlSender exist as a separate class from ControlEngine?"
+  answer="Separation of concerns — the Engine knows WHAT the robot should do, the Sender knows WHEN to say it. This prevents redundant sends and enables rhythm-based optimization. The engine can recalculate freely without triggering network traffic; only the sender decides when the wire needs updating."
+/>
+
+---
+
+<KnowledgeCheck
+  question="What happens on reconnect?"
+  answer="reset() clears the rhythm baseline so the very first state after reconnecting is sent immediately, without waiting for the next rate-limited window. Then establishSessionBaseline() sends SAFE_STATE unconditionally to give the firmware the disarmed baseline it requires before accepting armed frames. After that, normal heartbeat and rate-limiting logic takes over."
+/>
+
+---
+
+### Source evidence
+
+- `sender.ts` — `ControlSender` class, `establishSessionBaseline()`, `emergencyStop()`, `update()` decision dispatch
+- `sender.test.ts` — rhythm decision coverage, reconnect baseline behavior, e-stop bypass tests
+
+---
+
+### Up next
+
+**Rhythm & Heartbeats** — The sender asks `decideSend()` for a decision. Here's how that decision works.

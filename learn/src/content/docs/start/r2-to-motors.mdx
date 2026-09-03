@@ -10,4 +10,32 @@ import Eyebrow from '../../../components/shared/Eyebrow.astro';
 
 Press a key, touch the screen, or move a game controller, and in well under a second a wheel turns. This is that trip, one stage at a time, on the same graph you saw in [System Architecture](/start/explore-the-system/) — use **Previous** / **Next** (or **Play**) below. The example below follows R2 on the Racing controller profile, but the same journey runs for every input.
 
+## Following one command
+
+The journey below traces a single realistic command: **DualSense R2 = 0.72, Left Stick X = -0.18**. Watch how it transforms at every stage:
+
+1. **Physical input** — R2 analog value and stick position read by the Gamepad API
+2. **Profile** — Racing profile maps R2 to forward throttle, Left Stick X to steering
+3. **Ownership** — gamepad is the active source
+4. **ControlEngine** — stores throttle 0.72, steering -0.18 as current desired state
+5. **ControlSender** — decides "rate" (significant change, within budget)
+6. **ControlFrame** — builds `{seq, sentAt, ttlMs, state}`
+7. **Relay** — stamps `controlSessionId`, forwards to device
+8. **Firmware** — validates session, seq, applies state
+9. **Differential mix** — left = 0.54, right = 0.90
+10. **ACK** — firmware confirms "I did that"
+
 <Explorer locale="en" storyId="r2-to-motors" initialLevel="technical" />
+
+## Dive deeper
+
+Each stage above has its own lesson:
+
+- [Browser Input](/control/browser-input/) — how physical input becomes normalized intent
+- [Input Ownership](/control/input-ownership/) — why only one source drives at a time
+- [Controller Profiles](/control/controller-profiles/) — how raw values map to semantic actions
+- [ControlEngine](/control/control-engine/) — the browser's single source of truth
+- [ControlSender](/control/control-sender/) — when state goes onto the network
+- [Rhythm & Heartbeats](/control/rhythm-heartbeats/) — the timing rules
+- [Control Frames](/control/control-frames/) — the wire format
+- [Differential Drive](/control/differential-drive/) — from state to wheel math

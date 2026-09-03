@@ -119,6 +119,14 @@ export function NodePassport({ concept, copy, ui, sourceRefs, level, onClose }: 
       )}
 
       {copy.tryIt && <Section label={ui.passport.tryIt}>{copy.tryIt}</Section>}
+
+      {concept.learnSlug && (
+        <section className="passport__section">
+          <a className="passport__learn-more" href={`/${concept.learnSlug}/`}>
+            Learn more →
+          </a>
+        </section>
+      )}
     </aside>
   );
 }

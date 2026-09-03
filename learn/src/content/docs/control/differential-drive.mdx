@@ -1,0 +1,175 @@
+---
+title: Differential Drive
+description: From throttle and steering to left and right wheel speeds — the movement math.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="mix" />
+
+## The problem
+
+The browser knows `throttle` and `steering`. The robot has two independently-powered wheels. How do we get from one to the other?
+
+You can't just wire `throttle` to both wheels — that would only go straight. You can't just wire `steering` to one wheel — that would spin in place. The robot needs a formula that takes two inputs and produces two outputs, one for each wheel, in a way that feels natural to the operator.
+
+## The idea
+
+Differential mix: add steering to the left wheel, subtract it from the right. This is the standard approach for two-wheel differential drive robots. Steering in one direction makes one wheel faster and the other slower. The result is a smooth, intuitive turning behavior that ranges from gentle curves to sharp pivots.
+
+## The formula
+
+From `protocol/src/mix.ts`:
+
+```typescript
+function differentialMix(throttle: number, steering: number): Wheels {
+  return {
+    left: clampAxis(throttle + steering),
+    right: clampAxis(throttle - steering),
+  };
+}
+```
+
+Two lines of math. `throttle + steering` for the left wheel, `throttle - steering` for the right. Both values are clamped to -1..1 by `clampAxis()` so they never overflow. That's the entire algorithm.
+
+## Examples
+
+**Straight forward** — `throttle: 0.6, steering: 0`
+
+```
+left  = 0.6 + 0   = 0.6
+right = 0.6 - 0   = 0.6
+```
+
+Both wheels equal. The robot drives in a straight line.
+
+**Turn while moving** — `throttle: 0.6, steering: 0.2`
+
+```
+left  = 0.6 + 0.2 = 0.8
+right = 0.6 - 0.2 = 0.4
+```
+
+Left wheel faster than right. The robot turns right. (Positive steering = right turn.)
+
+**Gentle left** — `throttle: 0.6, steering: -0.2`
+
+```
+left  = 0.6 + (-0.2) = 0.4
+right = 0.6 - (-0.2) = 0.8
+```
+
+Right wheel faster than left. The robot turns left. (Negative steering = left turn.)
+
+**Sharp turn** — `throttle: 0.2, steering: 0.8`
+
+```
+left  = 0.2 + 0.8 = 1.0  (clamped)
+right = 0.2 - 0.8 = -0.6
+```
+
+Wheels are moving in opposite directions — left forward, right backward. This is a near-pivot, the tightest turn the robot can make while still carrying some forward momentum.
+
+**Spin in place** — `throttle: 0, steering: 0.6`
+
+```
+left  = 0 + 0.6 = 0.6
+right = 0 - 0.6 = -0.6
+```
+
+Equal and opposite. Pure rotation around the center axis. The robot spins without moving forward or backward.
+
+These aren't hypothetical. The same logic works for every combination. The mix is deterministic — given the same throttle and steering, it always produces the same wheel speeds.
+
+## Clamping
+
+`clampAxis()` ensures values stay in -1..1. Without clamping:
+
+```
+throttle: 0.8 + steering: 0.5 = 1.3  ← overflow
+```
+
+The motor driver can't accept values outside -1..1. `clampAxis()` caps the output at the boundary, so `1.3` becomes `1.0`. The turn is slightly less sharp than the operator intended, but the motor gets a valid signal. Clamping is a safety net, not the normal path — well-behaved input values from `normalizeState()` stay within range.
+
+## Shared function
+
+The `differentialMix()` in `protocol/src/mix.ts` is identical to `applyMotors()` in the firmware. The dashboard and the robot compute the exact same result.
+
+This matters. When the dashboard shows "left wheel: 0.8, right wheel: 0.4", that's not an approximation. It's the exact numbers the firmware will apply. If the mix formula changes, it changes in both places at once — the protocol package is a shared dependency.
+
+## PWM — from abstract to motor power
+
+After the mix, each wheel value is still in the -1..1 range. But the motor driver needs a PWM (Pulse Width Modulation) byte — a number between 0 and 255 that controls how much power goes to the motor. The `wheelPwm()` function handles this conversion:
+
+```typescript
+const PWM_MIN = 90; // minimum that overcomes motor friction
+const PWM_MAX = 255; // full power
+const MOTOR_THRESHOLD = 0.02; // below this, motor stays un-energized
+
+function wheelPwm(value: number): number {
+  const magnitude = Math.abs(clampAxis(value));
+  if (magnitude < MOTOR_THRESHOLD) return 0;
+  return Math.round(PWM_MIN + magnitude * (PWM_MAX - PWM_MIN));
+}
+```
+
+The motor doesn't start at PWM 0 and scale linearly to 255. It starts at `PWM_MIN` (90) — the minimum power that actually overcomes the motor's internal friction. Below that, the motor just hums and heats up without turning. Above 90, the scale maps proportionally to full power at 255.
+
+## PWM examples
+
+```
+magnitude 0.0  → PWM   0  (not energized — below MOTOR_THRESHOLD)
+magnitude 0.01 → PWM   0  (still below MOTOR_THRESHOLD)
+magnitude 0.05 → PWM  90  (just above PWM_MIN)
+magnitude 0.5  → PWM 173  (90 + 0.5 × 165 = 172.5, rounded)
+magnitude 1.0  → PWM 255  (full power)
+```
+
+Notice that magnitude 0.5 doesn't give you 127 — it gives you 173. The motor spends most of its useful range in the upper half of the PWM scale. This is intentional: small movements near the center of the stick need enough power to actually move the wheels, not just buzz the motors.
+
+## Motor threshold
+
+Below `MOTOR_THRESHOLD` (0.02), the motor isn't energized at all. No current flows, no buzzing, no heating. This is the dead zone at the center of the joystick.
+
+The threshold matches the `ENGINE_THRESHOLD` (0.02) in the control engine, creating a consistent dead zone across the entire pipeline. When the joystick is centered, the engine reports the state as idle, the mix produces 0 for both wheels, and the PWM returns 0 — no power, no movement.
+
+## Logical drive model
+
+This is a logical drive model. The actual motor response depends on battery voltage, load, wheel grip, and surface. A PWM of 173 on a flat floor with a fresh battery might produce a different speed than the same PWM on carpet with a half-drained battery.
+
+But the math tells us what the _firmware commands_. The dashboard shows what the robot _tries_ to do, not what it physically achieves. For a full physical model, you'd need encoder feedback, PID control, and battery voltage compensation — that's a different system. The mix gives us a reliable, testable contract between the browser and the firmware.
+
+## Existing playground
+
+Try the **Differential Drive Lab** to see this in action — adjust throttle and steering with sliders, watch the wheels respond in real time. The lab uses the exact same `differentialMix()` and `wheelPwm()` functions from the protocol package, so what you see is what the robot does.
+
+---
+
+<KnowledgeCheck
+  question="With throttle=0.6 and steering=0.2, what are left and right before clamping?"
+  answer="left = 0.6 + 0.2 = 0.8, right = 0.6 - 0.2 = 0.4. Left is faster, so the robot turns right. Both values are within -1..1, so clamping doesn't change them."
+/>
+
+---
+
+<KnowledgeCheck
+  question="What PWM value does a wheel at magnitude 0.5 receive?"
+  answer="90 + 0.5 × (255 - 90) = 90 + 82.5 = 172.5, rounded to 173. The motor receives about 68% of full power, but starts at PWM_MIN (90) so the effective range is compressed toward the upper end."
+/>
+
+---
+
+### Source evidence
+
+- `mix.ts` — `differentialMix()`, `wheelPwm()`, `PWM_MIN`, `PWM_MAX`, `MOTOR_THRESHOLD`, `Wheels` interface
+- `mix.test.ts` — straight distribution, spin-in-place, overflow clamping, PWM range tests
+
+---
+
+### Up next
+
+**Rhythm & Heartbeats** — The sender asks `decideSend()` for a decision. Here's how that decision works.

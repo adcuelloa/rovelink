@@ -1,0 +1,201 @@
+---
+title: Control de entrada
+description: Por qué solo una fuente de entrada maneja a la vez — y cómo RoveLink decide cuál.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="ownership" />
+
+¿Qué pasa si presionás **W** mientras la palanca del controller también se está moviendo?
+
+## El modelo roto
+
+El enfoque ingenuo sería sumar todo: `keyboard throttle + gamepad throttle = total throttle`. Suena razonable hasta que lo pensás un par de segundos. Si el teclado dice `forward (1)` y el gamepad dice `backward (-1)`, ¿qué hace el robot? ¿Avanza, retrocede, o se queda quieto según el timing? Eso no es conducir — es una moneda al aire.
+
+## La regla
+
+Exactamente **una fuente** tiene control de la salida en cada momento. Las demás se recuerdan pero se ignoran. Sin sumar, sin lista de prioridades, sin negociación. Solo un propietario y una transferencia limpia.
+
+## La clase
+
+Todo el mecanismo vive en `InputOwnership` — una clase de 66 líneas en `ownership.ts`:
+
+```ts
+class InputOwnership {
+  #active: InputSource | null = null;
+
+  readonly #axes: Record<InputSource, Axes> = {
+    keyboard: { throttle: 0, steering: 0 },
+    touch: { throttle: 0, steering: 0 },
+    gamepad: { throttle: 0, steering: 0 },
+  };
+
+  readonly #grippers: Record<InputSource, Gripper> = {
+    keyboard: 'idle',
+    touch: 'idle',
+    gamepad: 'idle',
+  };
+}
+```
+
+Tres campos. `#active` es quién controla la salida actualmente — `'keyboard'`, `'touch'`, `'gamepad'`, o `null` si nada ha reclamado control todavía. `#axes` y `#grippers` son caches por fuente: los últimos valores conocidos de cada fuente, almacenados sin importar quién tenga el control.
+
+### La API
+
+| Método                        | Qué hace                                                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `claim(source)`               | Transferencia explícita. Pone `#active` en la fuente dada. Idempotente si esa fuente ya tiene el control.             |
+| `setAxes(source, axes)`       | Registra los ejes actuales de una fuente **sin** cambiar el ownership. Los valores se cachean, no se aplican.         |
+| `setGripper(source, gripper)` | Igual que `setAxes` pero para el estado de la pinza.                                                                  |
+| `active` (getter)             | Devuelve el propietario actual, o `null`.                                                                             |
+| `axes` (getter)               | Devuelve los ejes cacheados de **la fuente activa**. Si nadie tiene control, devuelve `{ throttle: 0, steering: 0 }`. |
+| `gripper` (getter)            | Devuelve la pinza de la fuente activa, o `'idle'` si nadie tiene control.                                             |
+
+Esa es toda la clase. Rastrea estado. **No** decide cuándo una fuente merece el control.
+
+## ¿Quién decide "actividad significativa"?
+
+La clase de ownership no decide qué cuenta como entrada significativa. Lo decide el caller — `control-view.ts` — una línea en el cableado de cada fuente:
+
+```ts
+// Keyboard: cualquier keydown reclama ownership
+onActivity: () => {
+  ownership.claim('keyboard');
+},
+
+// Gamepad: movimiento de la palanca más allá del deadzone reclama ownership
+onAxes: (throttle, steering) => {
+  ownership.setAxes('gamepad', { throttle, steering });
+  if (throttle !== 0 || steering !== 0) ownership.claim('gamepad');
+},
+
+// Gamepad: presión de pinza (no liberación) reclama ownership
+onGripper: (gripper) => {
+  ownership.setGripper('gamepad', gripper);
+  if (gripper !== 'idle') ownership.claim('gamepad');
+},
+
+// Touch: cualquier pointerdown reclama ownership
+button.addEventListener('pointerdown', () => {
+  ownership.claim('touch');
+  // ...
+});
+```
+
+La idea clave: la decisión es un **condicional de una línea** en el sitio de llamada. La regla de cada fuente es visible y auditable, no está enterrada dentro de la clase. Si querés cambiar cuándo el gamepad reclama el control, cambiás esa línea `if` — no la lógica de ownership en sí.
+
+## Transiciones de ownership
+
+Acá está la máquina de estados completa, impulsada por los caminos reales del código:
+
+### Nada reclamado todavía
+
+```
+active = null
+axes   = (0, 0)
+gripper = 'idle'
+```
+
+Ninguna fuente ha interactuado. La salida está inactiva. Este es el estado inicial.
+
+### Keyboard keydown
+
+```
+claim('keyboard')
+active = 'keyboard'
+axes   = (0, 0)    ← ejes cacheados del keyboard (aún no seteados)
+```
+
+El callback `onActivity` se dispara. El ownership pasa al teclado. Los ejes no son significativos hasta el próximo callback `onAxes`, que ocurre junto con `onActivity` — pero la transferencia de ownership es instantánea.
+
+### La palanca del gamepad se mueve más allá del deadzone
+
+```
+setAxes('gamepad', { throttle: 1, steering: 0 })
+claim('gamepad')
+active = 'gamepad'
+axes   = (1, 0)
+```
+
+El rescale del deadzone ya redujo el ruido por debajo del umbral a exactamente `0`. Un valor distinto de cero significa un movimiento real e intencional. `setAxes` almacena el valor, y luego `claim` transfiere el ownership.
+
+### Touch pointerdown
+
+```
+claim('touch')
+active = 'touch'
+```
+
+Mismo patrón. Cualquier interacción de puntero convierte a touch en la fuente activa.
+
+### Keyboard reclama del gamepad
+
+```
+active = 'gamepad'  (todavía tiene ejes del gamepad)
+keydown fires → claim('keyboard')
+active = 'keyboard'
+axes   = (1, 0)    ← los ejes más recientes del keyboard
+```
+
+Los ejes cacheados del gamepad todavía existen en `#axes['gamepad']`, pero el getter `axes` ahora devuelve los valores del teclado. Los valores del gamepad **nunca se suman** — solo se almacenan por si el gamepad reclama el control después.
+
+### Liberar la fuente activa
+
+```
+active = 'gamepad'
+setAxes('gamepad', { throttle: 0, steering: 0 })
+active = 'gamepad'  ← sigue teniendo control, pero los ejes son (0, 0)
+```
+
+Liberar la fuente activa pone sus ejes cacheados en cero. El ownership no cambia — el gamepad sigue teniendo control, simplemente no tiene nada que decir. El robot se detiene. Este es el camino seguro: liberar no transfiere accidentalmente el control a cualquier fuente que esté conectada.
+
+## A qué aplica el ownership
+
+Solo los ejes y la pinza de **la fuente activa** llegan a `ControlEngine`. Los valores de fuentes inactivas se cachean pero nunca se aplican. El engine nunca ve una suma, una mezcla, o un fallback — solo la intención del único propietario.
+
+Esto se fuerza por cómo `control-view.ts` cablea las cosas:
+
+```ts
+const applyAxes = () => engine.axes(ownership.axes.throttle, ownership.axes.steering);
+
+const applyGripper = () => engine.gripper(ownership.gripper);
+```
+
+`ownership.axes` es el getter. Devuelve la fuente que actualmente tiene el control. El engine no sabe que hay otras fuentes — solo ve la que está activa.
+
+## El modo de fallo que esto previene
+
+Sin ownership único, dos fuentes podrían discrepar sobre la dirección. Una lectura perdida del gamepad más una tecla presionada podrían sumarse en un throttle no intencional. Un gamepad volviendo de una breve desconexión podría inyectar una lectura distinta de cero en el momento exacto equivocado. El ownership único significa que cada valor que recibe el engine tiene una fuente única, rastreable — sin ambigüedad, sin colisión.
+
+## Demo en vivo
+
+En el Control Flow Lab, presioná una tecla y después tocá la pantalla táctil. Observá cómo cambia el indicador de ownership. Liberá todo y vuelve a inactivo. El gamepad nunca "pelea" con el teclado — uno siempre tiene el control claramente.
+
+<KnowledgeCheck
+  question="Si el gamepad es la fuente activa y presionás una tecla del teclado, ¿qué pasa con el valor de throttle del gamepad?"
+  answer="Se ignora. El teclado se convierte en la fuente activa y se usan sus ejes en su lugar. Los valores del gamepad se cachean pero no se aplican — solo importarán de nuevo si el gamepad reclama el ownership."
+/>
+
+<KnowledgeCheck
+  question="Si soltás la tecla activa del teclado sin ninguna otra entrada, ¿qué throttle llega a ControlEngine?"
+  answer="Cero. Liberar la fuente activa pone sus ejes cacheados en cero vía setAxes. El teclado sigue teniendo control, pero sus ejes son (0, 0), así que el robot se detiene."
+/>
+
+## Evidencia del código fuente
+
+| Archivo                             | Qué hace                                                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `web/src/control/ownership.ts`      | Clase `InputOwnership` — 66 líneas, todo el mecanismo                                              |
+| `web/src/control/ownership.test.ts` | Tests de cada transición: claim, reclaim, gamepad idle, fuente inactiva no sumada, release-to-zero |
+| `web/src/control-view.ts:314-333`   | Cableado del keyboard: `onActivity` → `claim('keyboard')`                                          |
+| `web/src/control-view.ts:341-393`   | Cableado del gamepad: axes/gripper/action claiming                                                 |
+| `web/src/control-view.ts:508-543`   | Cableado de touch: `pointerdown` → `claim('touch')`                                                |
+
+## Siguiente
+
+Ahora sabemos qué fuente conduce. Pero ¿cómo una lectura cruda del gamepad se convierte en "throttle" y "steering"? → [Perfiles del controlador](/es/control/controller-profiles/)

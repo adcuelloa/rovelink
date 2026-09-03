@@ -1,0 +1,187 @@
+---
+title: Browser Input
+description: What "input" means in RoveLink — from physical fingers to normalized intent.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="input" />
+
+When you press **W** on your keyboard, that's a `KeyboardEvent` with a `code` like `"KeyW"`. When you push **R2** on a DualSense, that's a `GamepadButton` with a `value` like `0.72`. These are completely different data shapes — different APIs, different value ranges, different lifecycles. The rest of RoveLink shouldn't need to know about both forever.
+
+## The idea
+
+Normalize physical input into semantic intent early. The pipeline doesn't want to know "KeyW is held" or "R2 analog value is 0.72". It wants to know:
+
+- **Throttle intent**: how fast, and in which direction?
+- **Steering intent**: which way, and how much?
+
+Everything downstream — ownership, profiles, the engine, the sender — works with these two numbers. The messy diversity of hardware stays behind one clean door.
+
+## Keyboard input
+
+The keyboard listener lives in `keyboard.ts`. When you press or release a key, it rebuilds the full intent from scratch using a `Set<KeyAction>` of currently-held keys.
+
+### The key map
+
+| Key         | `event.code` | Action         |
+| ----------- | ------------ | -------------- |
+| W           | `KeyW`       | `forward`      |
+| S           | `KeyS`       | `backward`     |
+| A           | `KeyA`       | `left`         |
+| D           | `KeyD`       | `right`        |
+| Arrow Up    | `ArrowUp`    | `forward`      |
+| Arrow Down  | `ArrowDown`  | `backward`     |
+| Arrow Left  | `ArrowLeft`  | `left`         |
+| Arrow Right | `ArrowRight` | `right`        |
+| Space       | `Space`      | `stop`         |
+| Q           | `KeyQ`       | `openGripper`  |
+| E           | `KeyE`       | `closeGripper` |
+| Z           | `KeyZ`       | `toggleArm`    |
+
+Driving actions (`forward`, `backward`, `left`, `right`) and gripper actions (`openGripper`, `closeGripper`) are **held keys** — they stay active as long as you hold the button. `stop` and `toggleArm` are **instant actions** — they fire once on press.
+
+### How axes are computed
+
+The `axesFromKeys` function is simple subtraction:
+
+```ts
+const axis = (plus, minus) => (active.has(plus) ? 1 : 0) - (active.has(minus) ? 1 : 0);
+
+return {
+  throttle: axis('forward', 'backward'),
+  steering: axis('right', 'left'),
+};
+```
+
+Each axis is `1`, `0`, or `-1`. There are no fractions — a keyboard key is either held or it isn't. The result is a clean `{ throttle: number, steering: number }` pair.
+
+### Opposites cancel
+
+Holding **W** gives `throttle = 1`. Holding **S** gives `throttle = -1`. Holding **both** gives `throttle = 0` — they cancel. This is the most predictable digital-to-analog translation for driving: the robot doesn't need to guess which key you "really" meant.
+
+### The gripper
+
+The `gripperFromKeys` function resolves gripper state from the same active set:
+
+```ts
+if (active.has('closeGripper')) return 'close';
+if (active.has('openGripper')) return 'open';
+return 'idle';
+```
+
+`closeGripper` wins if both are somehow held (same ambiguity rule as the gamepad's `gripperFromButtons`).
+
+## Gamepad input
+
+The Gamepad API gives you raw analog data through `navigator.getGamepads()`. Each connected gamepad exposes an `axes[]` array and a `buttons[]` array — the same shapes RoveLink's `GamepadLike` interface models.
+
+### Axes (analog sticks)
+
+Axes are continuous floating-point values, typically in the range `-1` to `1`:
+
+| Index | Control                           |
+| ----- | --------------------------------- |
+| 0     | LeftStickX (-1 = left, 1 = right) |
+| 1     | LeftStickY (-1 = up, 1 = down)    |
+| 2     | RightStickX                       |
+| 3     | RightStickY                       |
+
+A slight leftward tilt might read `-0.18`. A full forward push reads `1.0`. These values are mapped to semantic names (`LeftStickX`, `LeftStickY`, etc.) in exactly one place: `controls.ts`'s `STANDARD_AXES`.
+
+### Buttons (face buttons and triggers)
+
+Each button has both a `.pressed` boolean and a `.value` (0–1) analog depth:
+
+| Index | Control  | Index | Control   |
+| ----- | -------- | ----- | --------- |
+| 0     | Cross    | 8     | Create    |
+| 1     | Circle   | 9     | Options   |
+| 2     | Square   | 10    | L3        |
+| 3     | Triangle | 11    | R3        |
+| 4     | L1       | 12    | DPadUp    |
+| 5     | R1       | 13    | DPadDown  |
+| 6     | L2       | 14    | DPadLeft  |
+| 7     | R2       | 15    | DPadRight |
+
+This layout is the W3C Standard Gamepad mapping — verified against a real DualSense. Any controller Chrome reports as `mapping: "standard"` uses this same layout.
+
+### The press threshold
+
+Not every button has analog depth. Cross is purely digital: `.value` is `0` or `1`. But triggers like **R2** are analog: you can pull them to `0.3`, `0.72`, or all the way to `1.0`. RoveLink uses a `PRESS_THRESHOLD` of **0.5** — a button value above this reads as "pressed" for actions like arm/disarm/stop. Below it, it's considered released.
+
+## Why analog matters
+
+A digital button gives you two states: pressed or not. An analog trigger gives you a continuum. Pull R2 to `0.72` and the robot gets `throttle: 0.72` — seventy-two percent forward. Pull it to `0.3` and it gets `throttle: 0.3` — a gentle nudge.
+
+This is how proportional driving works. You don't slam to full speed or stop dead; you feather the trigger to control speed with precision. The `evaluateProfile` function in `profile.ts` reads this analog value and feeds it straight through to the engine.
+
+## Focus guard
+
+Typing in an input field should never drive the robot. The keyboard listener checks `isInField()` before processing any keystroke:
+
+```ts
+function isInField(tagName, editable) {
+  if (editable) return true;
+  const name = tagName.toUpperCase();
+  return name === 'INPUT' || name === 'TEXTAREA' || name === 'SELECT';
+}
+```
+
+This covers `<input>`, `<textarea>`, `<select>`, and any `contenteditable` element. It's also pure data — no DOM dependency — so it's testable without a browser.
+
+## Safety: release on blur
+
+When you switch tabs with a key held, `keyboard.ts` fires a `blur` handler that clears the active set immediately. A `visibilitychange` listener does the same. Without this, the robot would keep driving on a stale keypress while you're in another tab.
+
+## Sampling and diff detection
+
+The gamepad listener doesn't fire events — it **polls** using `requestAnimationFrame`, roughly 60 times per second. But it doesn't publish every sample. It copies raw axes and buttons into reused buffers each frame, then checks: did anything actually change? If the stick is perfectly still, the diff is zero and nothing is published. Only when something crosses the `threshold` (default `0.02`) — or returns exactly to zero — does the data flow onward.
+
+A returning-to-zero value is **always** published, even if the change is tiny. Zero is the brake. It must never be suppressed.
+
+## Where this connects
+
+Both input methods produce the same normalized shapes:
+
+- **Keyboard** → `Axes { throttle, steering }` + `Gripper` + `KeyAction`
+- **Gamepad** → `GamepadInput { throttle, steering, buttons }` (after profile evaluation)
+
+Both flow into the next layer: **Input Ownership** — which answers the question: "What if both are active at once?"
+
+## Real examples
+
+| Input               | Throttle | Steering |
+| ------------------- | -------- | -------- |
+| W held              | 1        | 0        |
+| S held              | -1       | 0        |
+| A held              | 0        | -1       |
+| D held              | 0        | 1        |
+| W + A held          | 1        | -1       |
+| W + S held          | 0        | 0        |
+| R2 at 0.72          | 0.72     | 0        |
+| LeftStickX at -0.18 | —        | -0.18    |
+| Nothing held        | 0        | 0        |
+
+<KnowledgeCheck
+  question="If you hold W and S at the same time, what throttle value reaches the rest of the pipeline?"
+  answer="Zero. The axesFromKeys function computes forward(1) - backward(1) = 0. Opposites cancel — this is the most predictable behavior for digital input."
+/>
+
+## Source evidence
+
+| File                               | What it does                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------- |
+| `web/src/control/keyboard.ts`      | `listenKeyboard`, `actionForKey`, `axesFromKeys`, `gripperFromKeys`, `isInField` |
+| `web/src/control/keyboard.test.ts` | Tests for key mapping, held/instant actions, field guard, release-on-blur        |
+| `web/src/control/gamepad.ts`       | `listenGamepad` — RAF polling, diff detection, baseline at connect               |
+| `web/src/control/controls.ts`      | `STANDARD_AXES`, `STANDARD_BUTTONS`, `PRESS_THRESHOLD` (0.5), `readSemantic`     |
+| `web/src/control/gamepad.test.ts`  | Tests for gamepad sampling, threshold, baseline behavior                         |
+
+## Next
+
+Now that we have two kinds of input — keyboard and gamepad — what happens when both are active at the same time? → [Input Ownership](/control/input-ownership/)

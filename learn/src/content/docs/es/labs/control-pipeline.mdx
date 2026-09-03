@@ -9,15 +9,53 @@ import Eyebrow from '../../../../components/shared/Eyebrow.astro';
 
 <Eyebrow>Laboratorio</Eyebrow>
 
-Maneja con **WASD o las flechas** (Espacio para detener, Q/E para la pinza, Z para armar/desarmar — el mapeo real de teclado de RoveLink), el panel táctil en pantalla, o un control real conectado y en movimiento. Todo lo que está antes de **CONTROLENGINE**, **CONTROLSENDER**, la propiedad de entrada, y el manejo de teclado/control es el código real de RoveLink sin modificar — solo la red, el relevo y el firmware después de ese punto están <span className="rl-badge-sim">SIMULADOS</span>.
+## Lo que vas a controlar
+
+Este laboratorio ejecuta el pipeline real de control del lado del navegador de RoveLink — **InputOwnership**, **ControlEngine**, **ControlSender** — y simula la red, el relevo y el firmware después de ese límite. La mezcla diferencial es el `differentialMix()` real de `@rovelink/protocol`.
+
+## Prueba esto
+
+1. Presiona **Z** para armar el robot (observa el cambio de estado `armed`)
+2. Mantén **W** para avanzar — observa cómo sube el valor de throttle
+3. Presiona **A** o **D** para girar — mira el steering cambiar y las ruedas diferenciarse
+4. Mantén el stick quieto y observa la decisión del sender alternar entre **rate** y **heartbeat**
+5. Presiona **Espacio** para detener — nota el envío inmediato al frenar
+6. Intenta una segunda fuente de entrada (panel táctil o gamepad) — observa la transferencia de propiedad
+7. Intenta **Cortar conexión** mientras manejas — ve al robot detenerse solo
+
+## Qué notar
+
+- La propiedad se transfirió cuando usaste una segunda fuente de entrada
+- El engine almacenó el estado más reciente — no se acumuló cola
+- El sender decidió "immediate" en armar/desarmar/parar, "rate" en movimiento, "heartbeat" mientras se mantiene quieto
+- El frame llevó seq, sentAt, ttlMs — el relevo marcó controlSessionId
+- El firmware validó sesión y seq antes de aceptar
+- La mezcla diferencial convirtió tu throttle/steering en velocidades de rueda izquierda/derecha
+- El ACK confirmó que el robot aplicó tu comando
 
 <ControlLabWrapper locale="es" ui={ES_UI} />
 
-## Qué estás viendo
+## Qué deberías haber notado?
 
-- **Entrada → Propiedad**: solo una fuente maneja a la vez — prueba mantener una tecla y luego tocar el panel.
-- **ControlSender**: la decisión de ritmo de envío (immediate / rate / heartbeat) usando el `decideSend()` real.
-- **Firmware (sim)**: verificaciones de sesión, secuencia y línea base desarmada, reproduciendo `applyControlFrame()` del firmware real.
-- **Mezcla diferencial**: el `differentialMix()` real de `@rovelink/protocol` — idéntico a lo que corre el firmware.
+- La propiedad se transfirió cuando usaste una segunda fuente de entrada
+- El engine almacenó el estado más reciente — no se acumuló cola
+- El sender decidió "immediate" en armar/desarmar/parar, "rate" en movimiento, "heartbeat" mientras se mantiene quieto
+- El frame llevó seq, sentAt, ttlMs — el relevo marcó controlSessionId
+- El firmware validó sesión y seq antes de aceptar
+- La mezcla diferencial convirtió tu throttle/steering en velocidades de rueda izquierda/derecha
+- El ACK confirmó que el robot aplicó tu comando
+
+## Profundiza tu comprensión
+
+Cada concepto en este laboratorio tiene su propia lección:
+
+- [Entrada del navegador](/es/control/browser-input/) — cómo la entrada física se convierte en intención normalizada
+- [Control de entrada](/es/control/input-ownership/) — por qué solo una fuente maneja a la vez
+- [Perfiles del controlador](/es/control/controller-profiles/) — cómo los valores crudos se mapean a acciones semánticas
+- [ControlEngine](/es/control/control-engine/) — la única fuente de verdad del navegador
+- [ControlSender](/es/control/control-sender/) — cuándo el estado sale por la red
+- [Ritmo y heartbeats](/es/control/rhythm-heartbeats/) — las reglas de temporización
+- [Control Frames](/es/control/control-frames/) — el formato de red
+- [Tracción diferencial](/es/control/differential-drive/) — de estado a matemática de ruedas
 
 Prueba **Cortar conexión** mientras manejas, y luego mira [Seguridad de conexión](/es/labs/ttl/) para la versión enfocada de lo que pasa después.

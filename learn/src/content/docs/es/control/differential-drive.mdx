@@ -1,0 +1,175 @@
+---
+title: Tracción diferencial
+description: De throttle y steering a velocidades de rueda izquierda y derecha — la matemática del movimiento.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="mix" />
+
+## El problema
+
+El navegador conoce `throttle` y `steering`. El robot tiene dos ruedas con motores independientes. ¿Cómo pasamos de uno a otro?
+
+No podés simplemente cablear `throttle` a ambas ruedas — eso solo iría recto. No podés cablear `steering` a una rueda — eso giraría sobre su propio eje. El robot necesita una fórmula que tome dos entradas y produzca dos salidas, una para cada rueda, de una forma que se sienta natural para el operador.
+
+## La idea
+
+Mezcla diferencial: sumar steering a la rueda izquierda, restarlo de la derecha. Este es el enfoque estándar para robots con tracción diferencial de dos ruedas. Steering en una dirección hace que una rueda vaya más rápido y la otra más lento. El resultado es un comportamiento de giro suave e intuitivo que va desde curvas suaves hasta pivotes cerrados.
+
+## La fórmula
+
+Desde `protocol/src/mix.ts`:
+
+```typescript
+function differentialMix(throttle: number, steering: number): Wheels {
+  return {
+    left: clampAxis(throttle + steering),
+    right: clampAxis(throttle - steering),
+  };
+}
+```
+
+Dos líneas de matemática. `throttle + steering` para la rueda izquierda, `throttle - steering` para la derecha. Ambos valores se ajustan a -1..1 por `clampAxis()` para que nunca se desborden. Esa es toda la algoritmo.
+
+## Ejemplos
+
+**Recto hacia adelante** — `throttle: 0.6, steering: 0`
+
+```
+left  = 0.6 + 0   = 0.6
+right = 0.6 - 0   = 0.6
+```
+
+Ambas ruedas iguales. El robot avanza en línea recta.
+
+**Giro en movimiento** — `throttle: 0.6, steering: 0.2`
+
+```
+left  = 0.6 + 0.2 = 0.8
+right = 0.6 - 0.2 = 0.4
+```
+
+Rueda izquierda más rápida que la derecha. El robot gira a la derecha. (Steering positivo = giro a la derecha.)
+
+**Izquierda suave** — `throttle: 0.6, steering: -0.2`
+
+```
+left  = 0.6 + (-0.2) = 0.4
+right = 0.6 - (-0.2) = 0.8
+```
+
+Rueda derecha más rápida que la izquierda. El robot gira a la izquierda. (Steering negativo = giro a la izquierda.)
+
+**Giro cerrado** — `throttle: 0.2, steering: 0.8`
+
+```
+left  = 0.2 + 0.8 = 1.0  (clamped)
+right = 0.2 - 0.8 = -0.6
+```
+
+Las ruedas se mueven en direcciones opuestas — izquierda hacia adelante, derecha hacia atrás. Este es un pivote casi puro, el giro más cerrado que el robot puede hacer mientras mantiene algo de impulso hacia adelante.
+
+**Giro sobre su eje** — `throttle: 0, steering: 0.6`
+
+```
+left  = 0 + 0.6 = 0.6
+right = 0 - 0.6 = -0.6
+```
+
+Igual y opuesto. Rotación pura alrededor del eje central. El robot gira sin moverse hacia adelante ni hacia atrás.
+
+Estos no son hipotéticos. La misma lógica funciona para cada combinación. La mezcla es determinista — dados el mismo throttle y steering, siempre produce las mismas velocidades de rueda.
+
+## Clamping
+
+`clampAxis()` asegura que los valores se mantengan en -1..1. Sin clamping:
+
+```
+throttle: 0.8 + steering: 0.5 = 1.3  ← desbordamiento
+```
+
+El driver del motor no puede aceptar valores fuera de -1..1. `clampAxis()` limita la salida en el límite, así que `1.3` se convierte en `1.0`. El giro es un poco menos cerrado de lo que el operador pretendía, pero el motor recibe una señal válida. El clamping es una red de seguridad, no el camino normal — los valores de entrada bien comportados de `normalizeState()` se mantienen dentro del rango.
+
+## Función compartida
+
+El `differentialMix()` en `protocol/src/mix.ts` es idéntico a `applyMotors()` en el firmware. El dashboard y el robot computan exactamente el mismo resultado.
+
+Esto importa. Cuando el dashboard muestra "rueda izquierda: 0.8, rueda derecha: 0.4", eso no es una aproximación. Son los números exactos que el firmware aplicará. Si la fórmula de la mezcla cambia, cambia en ambos lugares a la vez — el paquete de protocolo es una dependencia compartida.
+
+## PWM — de abstracto a potencia del motor
+
+Después de la mezcla, cada valor de rueda sigue en el rango -1..1. Pero el driver del motor necesita un byte PWM (Pulse Width Modulation) — un número entre 0 y 255 que controla cuánta potencia va al motor. La función `wheelPwm()` maneja esta conversión:
+
+```typescript
+const PWM_MIN = 90; // mínimo que supera la fricción del motor
+const PWM_MAX = 255; // potencia total
+const MOTOR_THRESHOLD = 0.02; // por debajo, el motor no se energiza
+
+function wheelPwm(value: number): number {
+  const magnitude = Math.abs(clampAxis(value));
+  if (magnitude < MOTOR_THRESHOLD) return 0;
+  return Math.round(PWM_MIN + magnitude * (PWM_MAX - PWM_MIN));
+}
+```
+
+El motor no empieza en PWM 0 y escala linealmente a 255. Empieza en `PWM_MIN` (90) — la potencia mínima que realmente supera la fricción interna del motor. Por debajo de eso, el motor solo zumba y se calienta sin girar. Por encima de 90, la escala mapea proporcionalmente a potencia total en 255.
+
+## Ejemplos de PWM
+
+```
+magnitud 0.0  → PWM   0  (no energizado — por debajo de MOTOR_THRESHOLD)
+magnitud 0.01 → PWM   0  (todavía por debajo de MOTOR_THRESHOLD)
+magnitud 0.05 → PWM  90  (justo por encima de PWM_MIN)
+magnitud 0.5  → PWM 173  (90 + 0.5 × 165 = 172.5, redondeado)
+magnitud 1.0  → PWM 255  (potencia total)
+```
+
+Notá que la magnitud 0.5 no te da 127 — te da 173. El motor pasa la mayor parte de su rango útil en la mitad superior de la escala PWM. Esto es intencional: movimientos pequeños cerca del centro de la palanca necesitan suficiente potencia para realmente mover las ruedas, no solo hacer zumbar los motores.
+
+## Umbral del motor
+
+Por debajo de `MOTOR_THRESHOLD` (0.02), el motor no se energiza en absoluto. Sin corriente, sin zumbido, sin calentamiento. Esta es la zona muerta en el centro del joystick.
+
+El umbral iguala el `ENGINE_THRESHOLD` (0.02) en el control engine, creando una zona muerta consistente a través de toda la pipeline. Cuando el joystick está centrado, el engine reporta el estado como idle, la mezcla produce 0 para ambas ruedas, y el PWM devuelve 0 — sin potencia, sin movimiento.
+
+## Modelo de conducción lógico
+
+Este es un modelo de conducción lógico. La respuesta real del motor depende del voltaje de la batería, la carga, el agarre de las ruedas, y la superficie. Un PWM de 173 en un piso liso con una batería nueva podría producir una velocidad diferente al mismo PWM en alfombra con una batería a medio cargar.
+
+Pero la matemática nos dice qué _ordena el firmware_. El dashboard muestra qué _intenta hacer_ el robot, no lo que físicamente logra. Para un modelo físico completo, necesitarías feedback de encoder, control PID, y compensación de voltaje de batería — eso es un sistema diferente. La mezcla nos da un contrato confiable y testeable entre el navegador y el firmware.
+
+## Playground existente
+
+Probá el **Differential Drive Lab** para ver esto en acción — ajustá throttle y steering con sliders, observá las ruedas responder en tiempo real. El lab usa exactamente las mismas funciones `differentialMix()` y `wheelPwm()` del paquete de protocolo, así que lo que ves es lo que el robot hace.
+
+---
+
+<KnowledgeCheck
+  question="Con throttle=0.6 y steering=0.2, ¿cuáles son las ruedas izquierda y derecha antes del clamping?"
+  answer="left = 0.6 + 0.2 = 0.8, right = 0.6 - 0.2 = 0.4. La izquierda es más rápida, así que el robot gira a la derecha. Ambos valores están dentro de -1..1, así que el clamping no los cambia."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Qué valor PWM recibe una rueda con magnitud 0.5?"
+  answer="90 + 0.5 × (255 - 90) = 90 + 82.5 = 172.5, redondeado a 173. El motor recibe alrededor del 68% de la potencia total, pero empieza en PWM_MIN (90) así que el rango efectivo está comprimido hacia el extremo superior."
+/>
+
+---
+
+### Evidencia del código fuente
+
+- `mix.ts` — `differentialMix()`, `wheelPwm()`, `PWM_MIN`, `PWM_MAX`, `MOTOR_THRESHOLD`, interfaz `Wheels`
+- `mix.test.ts` — distribución recta, giro sobre el eje, clamping por desbordamiento, tests de rango PWM
+
+---
+
+### Siguiente
+
+**Ritmo y heartbeats** — El sender le pregunta a `decideSend()` por una decisión. Acá está cómo funciona esa decisión.

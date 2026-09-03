@@ -1,0 +1,187 @@
+---
+title: Entrada del navegador
+description: Qué significa "entrada" en RoveLink — de los dedos físicos a la intención normalizada.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="input" />
+
+Cuando presionás **W** en el teclado, eso es un `KeyboardEvent` con un `code` como `"KeyW"`. Cuando empujás **R2** en un DualSense, eso es un `GamepadButton` con un `value` como `0.72`. Son formas de datos completamente distintas — APIs distintas, rangos de valores distintos, ciclos de vida distintos. El resto de RoveLink no debería tener que conocer ambas para siempre.
+
+## La idea
+
+Normalizar la entrada física en una intención semántica temprano. La pipeline no quiere saber "KeyW está presionado" o "el valor analógico de R2 es 0.72". Quiere saber:
+
+- **Intención de throttle**: qué tan rápido, y en qué dirección?
+- **Intención de steering**: hacia dónde, y cuánto?
+
+Todo lo que viene después — ownership, perfiles, el engine, el sender — trabaja con estos dos números. La diversidad desordenada del hardware queda detrás de una puerta limpia.
+
+## Entrada por teclado
+
+El listener del teclado vive en `keyboard.ts`. Cuando presionás o soltás una tecla, reconstruye la intención completa desde cero usando un `Set<KeyAction>` con las teclas que están presionadas.
+
+### El mapa de teclas
+
+| Tecla            | `event.code` | Acción         |
+| ---------------- | ------------ | -------------- |
+| W                | `KeyW`       | `forward`      |
+| S                | `KeyS`       | `backward`     |
+| A                | `KeyA`       | `left`         |
+| D                | `KeyD`       | `right`        |
+| Flecha arriba    | `ArrowUp`    | `forward`      |
+| Flecha abajo     | `ArrowDown`  | `backward`     |
+| Flecha izquierda | `ArrowLeft`  | `left`         |
+| Flecha derecha   | `ArrowRight` | `right`        |
+| Espacio          | `Space`      | `stop`         |
+| Q                | `KeyQ`       | `openGripper`  |
+| E                | `KeyE`       | `closeGripper` |
+| Z                | `KeyZ`       | `toggleArm`    |
+
+Las acciones de conducción (`forward`, `backward`, `left`, `right`) y las acciones de la pinza (`openGripper`, `closeGripper`) son **teclas mantenidas** — permanecen activas mientras sostenés el botón. `stop` y `toggleArm` son **acciones instantáneas** — se disparan una sola vez al presionar.
+
+### Cómo se computan los ejes
+
+La función `axesFromKeys` es una simple resta:
+
+```ts
+const axis = (plus, minus) => (active.has(plus) ? 1 : 0) - (active.has(minus) ? 1 : 0);
+
+return {
+  throttle: axis('forward', 'backward'),
+  steering: axis('right', 'left'),
+};
+```
+
+Cada eje es `1`, `0` o `-1`. No hay fracciones — una tecla del teclado o está presionada o no lo está. El resultado es un par limpio `{ throttle: number, steering: number }`.
+
+### Los opuestos se cancelan
+
+Sostener **W** da `throttle = 1`. Sostener **S** da `throttle = -1`. Sostener **ambos** da `throttle = 0` — se cancelan. Esta es la traducción de digital a analógico más predecible para la conducción: el robot no necesita adivinar qué tecla "realmente" quisiste.
+
+### La pinza
+
+La función `gripperFromKeys` resuelve el estado de la pinza desde el mismo conjunto activo:
+
+```ts
+if (active.has('closeGripper')) return 'close';
+if (active.has('openGripper')) return 'open';
+return 'idle';
+```
+
+`closeGripper` gana si ambos están presionados de alguna manera (misma regla de ambigüedad que `gripperFromButtons` del gamepad).
+
+## Entrada del gamepad
+
+La API de Gamepad te da datos analógicos crudos a través de `navigator.getGamepads()`. Cada gamepad conectado expone un array `axes[]` y un array `buttons[]` — las mismas formas que modela la interfaz `GamepadLike` de RoveLink.
+
+### Ejes (palancas analógicas)
+
+Los ejes son valores de punto flotante continuos, típicamente en el rango `-1` a `1`:
+
+| Índice | Control                                  |
+| ------ | ---------------------------------------- |
+| 0      | LeftStickX (-1 = izquierda, 1 = derecha) |
+| 1      | LeftStickY (-1 = arriba, 1 = abajo)      |
+| 2      | RightStickX                              |
+| 3      | RightStickY                              |
+
+Un ligero giro hacia la izquierda podría dar `-0.18`. Un empuje completo hacia adelante da `1.0`. Estos valores se mapean a nombres semánticos (`LeftStickX`, `LeftStickY`, etc.) en un único lugar: `STANDARD_AXES` de `controls.ts`.
+
+### Botones (botones de cara y gatillos)
+
+Cada botón tiene tanto un `.pressed` booleano como un `.value` (0–1) de profundidad analógica:
+
+| Índice | Control  | Índice | Control   |
+| ------ | -------- | ------ | --------- |
+| 0      | Cross    | 8      | Create    |
+| 1      | Circle   | 9      | Options   |
+| 2      | Square   | 10     | L3        |
+| 3      | Triangle | 11     | R3        |
+| 4      | L1       | 12     | DPadUp    |
+| 5      | R1       | 13     | DPadDown  |
+| 6      | L2       | 14     | DPadLeft  |
+| 7      | R2       | 15     | DPadRight |
+
+Este layout es el mapeo W3C Standard Gamepad — verificado contra un DualSense real. Cualquier controlador que Chrome reporta como `mapping: "standard"` usa este mismo layout.
+
+### El umbral de presión
+
+No todo botón tiene profundidad analógica. Cross es puramente digital: `.value` es `0` o `1`. Pero gatillos como **R2** son analógicos: podés tirarlos a `0.3`, `0.72`, o todo el camino a `1.0`. RoveLink usa un `PRESS_THRESHOLD` de **0.5** — un valor de botón por encima de esto se lee como "presionado" para acciones como armar/desarmar/parar. Por debajo, se considera suelto.
+
+## Por qué importa lo analógico
+
+Un botón digital te da dos estados: presionado o no. Un gatillo analógico te da un continuo. Tirás R2 a `0.72` y el robot recibe `throttle: 0.72` — setenta y dos por ciento hacia adelante. Tirás a `0.3` y recibe `throttle: 0.3` — un empujón suave.
+
+Así funciona la conducción proporcional. No vas a toda velocidad de golpe ni frenás de golpe; modulás el gatillo para controlar la velocidad con precisión. La función `evaluateProfile` en `profile.ts` lee este valor analógico y lo alimenta directo al engine.
+
+## Protección de foco
+
+Escribir en un campo de entrada nunca debería manejar el robot. El listener del teclado verifica `isInField()` antes de procesar cualquier tecla:
+
+```ts
+function isInField(tagName, editable) {
+  if (editable) return true;
+  const name = tagName.toUpperCase();
+  return name === 'INPUT' || name === 'TEXTAREA' || name === 'SELECT';
+}
+```
+
+Esto cubre `<input>`, `<textarea>`, `<select>`, y cualquier elemento `contenteditable`. También es puro datos — sin dependencia del DOM — así que es testeable sin un navegador.
+
+## Seguridad: soltar al perder foco
+
+Cuando cambiás de pestaña con una tecla presionada, `keyboard.ts` dispara un handler de `blur` que limpia el conjunto activo inmediatamente. Un listener de `visibilitychange` hace lo mismo. Sin esto, el seguiría conduciendo con una tecla obsoleta mientras estás en otra pestaña.
+
+## Muestreo y detección de cambios
+
+El listener del gamepad no dispara eventos — **muestrea** usando `requestAnimationFrame`, aproximadamente 60 veces por segundo. Pero no publica cada muestra. Copia los ejes y botones crudos en buffers reutilizados cada frame, y luego verifica: ¿algo cambió realmente? Si la palanca está perfectamente quieta, el diff es cero y no se publica nada. Solo cuando algo cruza el `threshold` (por defecto `0.02`) — o vuelve exactamente a cero — los datos fluyen hacia adelante.
+
+Un valor que vuelve a cero **siempre** se publica, aunque el cambio sea mínimo. Cero es el freno. Nunca debe ser suprimido.
+
+## Dónde se conecta esto
+
+Ambos métodos de entrada producen las mismas formas normalizadas:
+
+- **Teclado** → `Axes { throttle, steering }` + `Gripper` + `KeyAction`
+- **Gamepad** → `GamepadInput { throttle, steering, buttons }` (después de evaluar el perfil)
+
+Ambos fluyen a la siguiente capa: **Control de entrada** — que responde la pregunta: "¿Qué pasa si ambos están activos al mismo tiempo?"
+
+## Ejemplos reales
+
+| Entrada            | Throttle | Steering |
+| ------------------ | -------- | -------- |
+| W presionado       | 1        | 0        |
+| S presionado       | -1       | 0        |
+| A presionado       | 0        | -1       |
+| D presionado       | 0        | 1        |
+| W + A presionados  | 1        | -1       |
+| W + S presionados  | 0        | 0        |
+| R2 a 0.72          | 0.72     | 0        |
+| LeftStickX a -0.18 | —        | -0.18    |
+| Nada presionado    | 0        | 0        |
+
+<KnowledgeCheck
+  question="Si sostenés W y S al mismo tiempo, ¿qué valor de throttle llega al resto de la pipeline?"
+  answer="Cero. La función axesFromKeys computa forward(1) - backward(1) = 0. Los opuestos se cancelan — este es el comportamiento más predecible para entrada digital."
+/>
+
+## Evidencia del código fuente
+
+| Archivo                            | Qué hace                                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `web/src/control/keyboard.ts`      | `listenKeyboard`, `actionForKey`, `axesFromKeys`, `gripperFromKeys`, `isInField`                       |
+| `web/src/control/keyboard.test.ts` | Tests de mapeo de teclas, acciones mantenidas/instantáneas, protección de campo, soltar al perder foco |
+| `web/src/control/gamepad.ts`       | `listenGamepad` — muestreo por RAF, detección de cambios, baseline al conectar                         |
+| `web/src/control/controls.ts`      | `STANDARD_AXES`, `STANDARD_BUTTONS`, `PRESS_THRESHOLD` (0.5), `readSemantic`                           |
+| `web/src/control/gamepad.test.ts`  | Tests de muestreo del gamepad, threshold, comportamiento de baseline                                   |
+
+## Siguiente
+
+Ahora que tenemos dos tipos de entrada — teclado y gamepad — ¿qué pasa cuando ambos están activos al mismo tiempo? → [Control de entrada](/es/control/input-ownership/)

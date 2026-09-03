@@ -1,0 +1,201 @@
+---
+title: Input Ownership
+description: Why only one input source drives at a time — and how RoveLink decides which.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="ownership" />
+
+What happens if you press **W** while the controller stick is also moving?
+
+## The broken model
+
+The naive approach would sum everything: `keyboard throttle + gamepad throttle = total throttle`. That sounds reasonable until you think about it for two seconds. If the keyboard says `forward (1)` and the gamepad says `backward (-1)`, what does the robot do? Drive forward, backward, or stand still depending on timing? That's not driving — that's a coin flip.
+
+## The rule
+
+Exactly **one source** owns the output at any time. The others are remembered but ignored. No summing, no priority list, no negotiation. Just one owner and a clean handoff.
+
+## The class
+
+The entire mechanism lives in `InputOwnership` — a 66-line class in `ownership.ts`:
+
+```ts
+class InputOwnership {
+  #active: InputSource | null = null;
+
+  readonly #axes: Record<InputSource, Axes> = {
+    keyboard: { throttle: 0, steering: 0 },
+    touch: { throttle: 0, steering: 0 },
+    gamepad: { throttle: 0, steering: 0 },
+  };
+
+  readonly #grippers: Record<InputSource, Gripper> = {
+    keyboard: 'idle',
+    touch: 'idle',
+    gamepad: 'idle',
+  };
+}
+```
+
+Three fields. `#active` is who currently owns the output — `'keyboard'`, `'touch'`, `'gamepad'`, or `null` if nothing has ever claimed ownership. `#axes` and `#grippers` are per-source caches: the last known values from each source, stored regardless of who owns the output.
+
+### The API
+
+| Method                        | What it does                                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `claim(source)`               | Explicit hand-off. Sets `#active` to the given source. Idempotent if that source already owns it.     |
+| `setAxes(source, axes)`       | Records a source's current axes **without** changing ownership. The values are cached, not applied.   |
+| `setGripper(source, gripper)` | Same as `setAxes` but for gripper state.                                                              |
+| `active` (getter)             | Returns the current owner, or `null`.                                                                 |
+| `axes` (getter)               | Returns the **active source's** cached axes. If nothing owns, returns `{ throttle: 0, steering: 0 }`. |
+| `gripper` (getter)            | Returns the active source's gripper, or `'idle'` if nothing owns.                                     |
+
+That's the whole class. It tracks state. It does **not** decide when a source deserves ownership.
+
+## Who decides "meaningful activity"?
+
+The ownership class doesn't decide what counts as meaningful input. The caller does — `control-view.ts` — one line at each source's wiring:
+
+```ts
+// Keyboard: any keydown claims ownership
+onActivity: () => {
+  ownership.claim('keyboard');
+},
+
+// Gamepad: stick movement past deadzone claims ownership
+onAxes: (throttle, steering) => {
+  ownership.setAxes('gamepad', { throttle, steering });
+  if (throttle !== 0 || steering !== 0) ownership.claim('gamepad');
+},
+
+// Gamepad: gripper press (not release) claims ownership
+onGripper: (gripper) => {
+  ownership.setGripper('gamepad', gripper);
+  if (gripper !== 'idle') ownership.claim('gamepad');
+},
+
+// Touch: any pointerdown claims ownership
+button.addEventListener('pointerdown', () => {
+  ownership.claim('touch');
+  // ...
+});
+```
+
+The key insight: the decision is a **one-line conditional** at the call site. Each source's rule is visible and auditable, not buried inside the class. If you want to change when the gamepad claims ownership, you change that one `if` line — not the ownership logic itself.
+
+## Ownership transitions
+
+Here's the full state machine, driven by real code paths:
+
+### Nothing claimed yet
+
+```
+active = null
+axes   = (0, 0)
+gripper = 'idle'
+```
+
+No source has ever interacted. The output is idle. This is the starting state.
+
+### Keyboard keydown
+
+```
+claim('keyboard')
+active = 'keyboard'
+axes   = (0, 0)    ← keyboard's cached axes (not yet set)
+```
+
+The `onActivity` callback fires. Ownership moves to keyboard. The axes aren't meaningful until the next `onAxes` callback, which happens alongside the `onActivity` — but the ownership handoff is instant.
+
+### Gamepad stick moves past deadzone
+
+```
+setAxes('gamepad', { throttle: 1, steering: 0 })
+claim('gamepad')
+active = 'gamepad'
+axes   = (1, 0)
+```
+
+The deadzone rescale already reduced sub-threshold noise to exactly `0`. A nonzero value means real, intentional movement. The `setAxes` stores the value, then `claim` hands ownership.
+
+### Touch pointerdown
+
+```
+claim('touch')
+active = 'touch'
+```
+
+Same pattern. Any pointer interaction makes touch the active source.
+
+### Keyboard reclaims from gamepad
+
+```
+active = 'gamepad'  (still has axes from gamepad)
+keydown fires → claim('keyboard')
+active = 'keyboard'
+axes   = (1, 0)    ← keyboard's most recent axes
+```
+
+The gamepad's cached axes still exist in `#axes['gamepad']`, but the `axes` getter now returns keyboard's values. Gamepad values are **never summed** — they're just stored in case gamepad reclaims later.
+
+### Releasing the active source
+
+```
+active = 'gamepad'
+setAxes('gamepad', { throttle: 0, steering: 0 })
+active = 'gamepad'  ← still owns, but axes are (0, 0)
+```
+
+Releasing the active source zeroes its cached axes. Ownership doesn't change — the gamepad still owns, it just has nothing to say. The robot stops. This is the safe path: releasing doesn't accidentally hand control to whatever source happened to be plugged in.
+
+## What ownership applies to
+
+Only the **active source's** axes and gripper reach `ControlEngine`. Values from inactive sources are cached but never applied. The engine never sees a sum, a blend, or a fallback — just the one owner's intent.
+
+This is enforced by how `control-view.ts` wires things up:
+
+```ts
+const applyAxes = () => engine.axes(ownership.axes.throttle, ownership.axes.steering);
+
+const applyGripper = () => engine.gripper(ownership.gripper);
+```
+
+`ownership.axes` is the getter. It returns whichever source currently owns. The engine doesn't know there are other sources — it only sees the one that's active.
+
+## The failure mode this prevents
+
+Without single ownership, two sources could disagree on direction. A stray gamepad reading plus a held key could sum into unintended throttle. A gamepad returning from a brief disconnect could inject a nonzero reading at exactly the wrong moment. Single ownership means every value the engine receives has a single, traceable source — no ambiguity, no collision.
+
+## Live demo
+
+In the Control Flow Lab, hold a key then touch the on-screen pad. Watch the ownership indicator change. Release everything and it returns to idle. The gamepad never "fights" the keyboard — one is always clearly in charge.
+
+<KnowledgeCheck
+  question="If the gamepad is the active source and you press a keyboard key, what happens to the gamepad's throttle value?"
+  answer="It's ignored. The keyboard becomes the active source and its axes are used instead. The gamepad's values are cached but not applied — they'll only matter again if the gamepad reclaims ownership."
+/>
+
+<KnowledgeCheck
+  question="If you release the active keyboard key without any other input, what throttle reaches ControlEngine?"
+  answer="Zero. Releasing the active source zeros its cached axes via setAxes. The keyboard still owns, but its axes are (0, 0), so the robot stops."
+/>
+
+## Source evidence
+
+| File                                | What it does                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `web/src/control/ownership.ts`      | `InputOwnership` class — 66 lines, the entire mechanism                                               |
+| `web/src/control/ownership.test.ts` | Tests for every transition: claim, reclaim, idle gamepad, inactive source not summed, release-to-zero |
+| `web/src/control-view.ts:314-333`   | Keyboard wiring: `onActivity` → `claim('keyboard')`                                                   |
+| `web/src/control-view.ts:341-393`   | Gamepad wiring: axes/gripper/action claiming                                                          |
+| `web/src/control-view.ts:508-543`   | Touch wiring: `pointerdown` → `claim('touch')`                                                        |
+
+## Next
+
+Now we know which source drives. But how does a raw gamepad reading become "throttle" and "steering"? → [Controller Profiles](/control/controller-profiles/)

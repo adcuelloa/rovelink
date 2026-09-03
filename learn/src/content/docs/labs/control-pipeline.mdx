@@ -9,15 +9,50 @@ import Eyebrow from '../../../components/shared/Eyebrow.astro';
 
 <Eyebrow>Lab</Eyebrow>
 
-Drive with **WASD or the arrow keys** (Space to stop, Q/E for the gripper, Z to arm/disarm — the real RoveLink keyboard mapping), the on-screen touch pad, or a real gamepad plugged in and moved. Everything below **CONTROLENGINE**, **CONTROLSENDER**, ownership, and the keyboard/gamepad handling is the actual, unmodified RoveLink code — only the network, relay, and firmware past that point are <span className="rl-badge-sim">SIMULATED</span>.
+## What you're about to control
+
+This lab runs the real RoveLink browser-side control pipeline — **InputOwnership**, **ControlEngine**, **ControlSender** — and simulates the network, relay, and firmware past that boundary. The differential mix is the real `differentialMix()` from `@rovelink/protocol`.
+
+## Try this
+
+1. Press **Z** to arm the robot (watch the `armed` state change)
+2. Hold **W** to drive forward — observe the throttle value rise
+3. Press **A** or **D** to turn — watch steering change and wheels differentiate
+4. Hold the stick steady and observe the sender decision cycle between **rate** and **heartbeat**
+5. Press **Space** to stop — note the immediate send on braking
+6. Try a second input source (touch pad or gamepad) — watch ownership transfer
+7. Try **Cut connection** while driving — see the robot stop on its own
+
+## What to notice
+
+- **Ownership**: only one source drives at a time — try holding a key, then touching the pad
+- **ControlSender**: the send-rhythm decision (immediate / rate / heartbeat) using the real `decideSend()`
+- **Firmware (sim)**: session, sequence, and disarmed-baseline checks, reproducing `applyControlFrame()` from the real firmware
+- **Differential mix**: the real `differentialMix()` from `@rovelink/protocol` — identical to what the firmware runs
 
 <ControlLabWrapper locale="en" ui={EN_UI} />
 
-## What you're seeing
+## What should you have noticed?
 
-- **Input → Ownership**: only one source drives at a time — try holding a key, then touching the pad.
-- **ControlSender**: the send-rhythm decision (immediate / rate / heartbeat) using the real `decideSend()`.
-- **Firmware (sim)**: session, sequence, and disarmed-baseline checks, reproducing `applyControlFrame()` from the real firmware.
-- **Differential mix**: the real `differentialMix()` from `@rovelink/protocol` — identical to what the firmware runs.
+- Ownership transferred when you used a second input source
+- The engine stored the latest state — no queue accumulated
+- The sender decided "immediate" on arm/disarm/stop, "rate" on movement, "heartbeat" while held steady
+- The frame carried seq, sentAt, ttlMs — the relay stamped controlSessionId
+- The firmware validated session and seq before accepting
+- The differential mix converted your throttle/steering into left/right wheel speeds
+- The ACK confirmed the robot applied your command
+
+## Deepen your understanding
+
+Each concept in this lab has its own lesson:
+
+- [Browser Input](/control/browser-input/) — how physical input becomes normalized intent
+- [Input Ownership](/control/input-ownership/) — why only one source drives at a time
+- [Controller Profiles](/control/controller-profiles/) — how raw values map to semantic actions
+- [ControlEngine](/control/control-engine/) — the browser's single source of truth
+- [ControlSender](/control/control-sender/) — when state goes onto the network
+- [Rhythm & Heartbeats](/control/rhythm-heartbeats/) — the timing rules
+- [Control Frames](/control/control-frames/) — the wire format
+- [Differential Drive](/control/differential-drive/) — from state to wheel math
 
 Try **Cut connection** while driving, then watch [Connection Safety](/labs/ttl/) for the focused version of what happens next.

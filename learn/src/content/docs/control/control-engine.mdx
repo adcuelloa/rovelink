@@ -1,0 +1,177 @@
+---
+title: ControlEngine
+description: The browser's single source of truth for what the robot should be doing right now.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="engine" />
+
+## The problem
+
+The browser receives input events continuously — joystick positions update sixty times a second, button presses come and go. Should it queue every value? Send them all in order? What if the operator has already moved on from an old command?
+
+A queue would be dangerous. An old "turn left" command playing back after a "turn right" would cause the robot to jerk unpredictably. History is irrelevant. Only the current intention matters.
+
+## The idea
+
+`ControlEngine` holds **one** `ControlState` — the current desired robot state. Not a queue. Not a history. Every write replaces the previous value. Latest state wins.
+
+If the operator pushes the stick forward, then centers it, the engine stores `throttle: 0`. Not "forward then center" — just the current reality: `0`.
+
+## The state shape
+
+From `@rovelink/protocol`:
+
+```typescript
+interface ControlState {
+  throttle: number; // -1 (reverse) .. 1 (forward)
+  steering: number; // -1 (left) .. 1 (right)
+  gripper: Gripper; // 'idle' | 'open' | 'close'
+  armed: boolean;
+}
+```
+
+Four fields. That's the entire vocabulary the browser uses to describe what the robot should be doing right now.
+
+## Safe state
+
+The fallback for everything — disconnect, emergency stop, TTL expiry, initial state:
+
+```typescript
+const SAFE_STATE: ControlState = {
+  throttle: 0,
+  steering: 0,
+  gripper: 'idle',
+  armed: false,
+};
+```
+
+When anything goes wrong, the engine falls back to `SAFE_STATE`. The robot stops. No partial stops, no "reduce speed" — full stop, disarmed.
+
+## Latest state wins
+
+Every write replaces the previous state. There is no queue:
+
+```
+t0: engine.axes(0.2, 0)   → state.throttle = 0.2
+t1: engine.axes(0.5, 0)   → state.throttle = 0.5  (replaces)
+t2: engine.axes(0.8, 0)   → state.throttle = 0.8  (replaces)
+
+Current desired state: 0.8
+NOT: [0.2, 0.5, 0.8 waiting to execute]
+```
+
+The old values are gone. The engine doesn't remember them. This is the fundamental safety property: a stale command can never play back after a newer one.
+
+## How state changes
+
+The engine exposes several write methods, each storing a different part of the state:
+
+**`axes(throttle, steering)`** — stores driving axes. This is the hot path, called every frame from the gamepad loop. Without arming, these values are stored but never reach the vehicle.
+
+**`gripper(gripper)`** — stores the gripper command (`'idle'`, `'open'`, or `'close'`).
+
+**`arm(armed)`** — arm or disarm. When arming, the engine first zeros the axes via `stoppedState()` (soft stop), then sets `armed: true`. The operator can't arm while holding the stick forward — the axes are cleared first. When disarming, `armed` becomes `false` and `applyArmed()` forces throttle/steering to zero regardless of what the operator is doing.
+
+**`emergencyStop()`** — sets `SAFE_STATE` immediately, bypassing the threshold filter. Always notifies listeners, even if the state was already idle.
+
+**`safeState(reason?)`** — sets `SAFE_STATE` on disconnect or controller loss.
+
+## Normalization
+
+Every state that enters the engine goes through `normalizeState()` from `@rovelink/protocol`. This clamps axes to `-1..1`, treats non-finite values as `0`, and rejects malformed gripper strings. The engine never stores invalid data.
+
+If a gamepad glitch sends `throttle: 42`, the engine stores `throttle: 1`. If it sends `throttle: NaN`, the engine stores `throttle: 0`.
+
+## Threshold filtering
+
+The engine only notifies listeners when the change exceeds a threshold (default `0.02`). This prevents re-rendering on analog stick noise — a stick that wobbles between `0.500` and `0.505` doesn't trigger a state change event.
+
+```typescript
+// From protocol: significantChange()
+previous.armed !== next.armed ||
+  previous.gripper !== next.gripper ||
+  Math.abs(previous.throttle - next.throttle) >= 0.02 ||
+  Math.abs(previous.steering - next.steering) >= 0.02;
+```
+
+The gripper and armed flags always notify on change — even a single-frame transition matters. But throttle and steering need a meaningful delta before the engine bothers telling anyone.
+
+Emergency stop bypasses this filter with `force = true` — it always notifies.
+
+## Arming
+
+When you arm, the engine calls `stoppedState()` first, which zeros axes while preserving the armed flag. Then it sets `armed: true`. The result: you can never arm with the stick already pushed forward.
+
+```typescript
+arm(armed: boolean): void {
+  if (this.#state.armed === armed) return;
+  this.#set({ ...stoppedState(this.#state), armed }, 'arm');
+}
+```
+
+When you disarm, the engine sets `armed: false`. The `applyArmed()` function wraps the state for the vehicle — when disarmed, throttle and steering are forced to `0` regardless of what the operator input says. The stick can be wherever it wants; the vehicle sees zero.
+
+## Effective state
+
+`effectiveState()` applies the arming filter:
+
+```typescript
+const effectiveState = (state) => applyArmed(state);
+// Armed:   returns state unchanged
+// Disarmed: returns SAFE_STATE (throttle=0, steering=0, gripper='idle', armed=false)
+```
+
+This is what the transport layer reads when building control frames. It never sees raw, unfiltered state.
+
+## Visual: current control state
+
+Here's what the engine might hold at a given instant:
+
+```
+armed       true
+throttle   +0.72
+steering   -0.18
+gripper     idle
+```
+
+This is the **only** state. There's no second copy, no pending commands, no buffered history. The sender reads this, the dashboard displays this, the vehicle obeys this (filtered through `applyArmed`).
+
+## What comes before and after
+
+**Before**: Profiles produce semantic input → Ownership selects one source → Engine stores it as current state.
+
+**After**: ControlSender reads the engine state and decides when to send it.
+
+The engine is the handoff point between "what the operator is doing" and "what the browser is telling the robot."
+
+## Knowledge checks
+
+<KnowledgeCheck
+  question="Does ControlEngine keep a queue of every joystick position the operator has ever pressed?"
+  answer="No. It holds exactly one ControlState. Each write replaces the previous value. Old commands are discarded — they can never play back."
+/>
+
+<KnowledgeCheck
+  question="What happens to throttle and steering when you disarm?"
+  answer="applyArmed() forces them to 0, even if the operator is still holding the stick. The vehicle sees SAFE_STATE until you arm again."
+/>
+
+## Source evidence
+
+These concepts live in:
+
+- `web/src/control/engine.ts` — `ControlEngine` class, `effectiveState()`, `SAFE_STATE` usage
+- `protocol/src/control.ts` — `ControlState`, `normalizeState()`, `applyArmed()`, `SAFE_STATE`, `significantChange()`
+- `web/src/control/engine.test.ts` — tests for last-state-wins, threshold filtering, arm/disarm safety, emergency stop
+
+## Next
+
+The browser knows what it wants. ControlSender decides when to say it.
+
+→ [ControlSender](/control/control-sender/)

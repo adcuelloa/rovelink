@@ -1,0 +1,177 @@
+---
+title: ControlEngine
+description: La única fuente de verdad del navegador sobre lo que el robot debe estar haciendo ahora.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="engine" />
+
+## El problema
+
+El navegador recibe eventos de entrada continuamente — las posiciones del joystick se actualizan sesenta veces por segundo, las presiones de botones van y vienen. ¿Debería encolar cada valor? ¿Enviarlos todos en orden? ¿Qué pasa si el operador ya pasó de un comando anterior?
+
+Una cola sería peligrosa. Un comando antiguo de "girar a la izquierda" reproduciéndose después de un "girar a la derecha" haría que el robot se moviera de forma impredecible. El historial es irrelevante. Solo importa la intención actual.
+
+## La idea
+
+`ControlEngine` mantiene **un** `ControlState` — el estado deseado actual del robot. No es una cola. No es un historial. Cada escritura reemplaza el valor anterior. El último estado gana.
+
+Si el operador empuja la palanca hacia adelante, y después la centra, el engine almacena `throttle: 0`. No "adelante y después centro" — solo la realidad actual: `0`.
+
+## La forma del estado
+
+Desde `@rovelink/protocol`:
+
+```typescript
+interface ControlState {
+  throttle: number; // -1 (reversa) .. 1 (adelante)
+  steering: number; // -1 (izquierda) .. 1 (derecha)
+  gripper: Gripper; // 'idle' | 'open' | 'close'
+  armed: boolean;
+}
+```
+
+Cuatro campos. Esa es todo el vocabulario que el navegador usa para describir lo que el robot debe estar haciendo ahora.
+
+## Estado seguro
+
+El fallback para todo — desconexión, parada de emergencia, expiración de TTL, estado inicial:
+
+```typescript
+const SAFE_STATE: ControlState = {
+  throttle: 0,
+  steering: 0,
+  gripper: 'idle',
+  armed: false,
+};
+```
+
+Cuando algo sale mal, el engine vuelve a `SAFE_STATE`. El robot se detiene. Sin paradas parciales, sin "reducir velocidad" — parada completa, desarmado.
+
+## El último estado gana
+
+Cada escritura reemplaza el estado anterior. No hay cola:
+
+```
+t0: engine.axes(0.2, 0)   → state.throttle = 0.2
+t1: engine.axes(0.5, 0)   → state.throttle = 0.5  (reemplaza)
+t2: engine.axes(0.8, 0)   → state.throttle = 0.8  (reemplaza)
+
+Estado deseado actual: 0.8
+NO: [0.2, 0.5, 0.8 esperando ejecutarse]
+```
+
+Los valores viejos se fueron. El engine no los recuerda. Esta es la propiedad fundamental de seguridad: un comando obsoleto nunca puede reproducirse después de uno más nuevo.
+
+## Cómo cambia el estado
+
+El engine expone varios métodos de escritura, cada uno almacenando una parte diferente del estado:
+
+**`axes(throttle, steering)`** — almacena los ejes de conducción. Este es el camino caliente, llamado cada frame desde el loop del gamepad. Sin armar, estos valores se almacenan pero nunca llegan al vehículo.
+
+**`gripper(gripper)`** — almacena el comando de pinza (`'idle'`, `'open'`, o `'close'`).
+
+**`arm(armed)`** — armar o desarmar. Al armar, el engine primero pone los ejes en cero vía `stoppedState()` (parada suave), y después pone `armed: true`. El operador no puede armar mientras sostiene la palanca hacia adelante — los ejes se limpian primero. Al desarmar, `armed` pasa a `false` y `applyArmed()` fuerza throttle/steering a cero sin importar lo que el operador esté haciendo.
+
+**`emergencyStop()`** — pone `SAFE_STATE` inmediatamente, saltándose el filtro de threshold. Siempre notifica a los listeners, incluso si el estado ya era idle.
+
+**`safeState(reason?)`** — pone `SAFE_STATE` al desconectar o perder el controlador.
+
+## Normalización
+
+Cada estado que entra al engine pasa por `normalizeState()` de `@rovelink/protocol`. Esto hace clamp de los ejes a `-1..1`, trata valores no finitos como `0`, y rechaza strings de pinza mal formados. El engine nunca almacena datos inválidos.
+
+Si un glitch del gamepad envía `throttle: 42`, el engine almacena `throttle: 1`. Si envía `throttle: NaN`, el engine almacena `throttle: 0`.
+
+## Filtro de threshold
+
+El engine solo notifica a los listeners cuando el cambio supera un threshold (por defecto `0.02`). Esto evita re-renderizar por ruido de la palanca analógica — una palanca que oscila entre `0.500` y `0.505` no dispara un evento de cambio de estado.
+
+```typescript
+// Desde protocol: significantChange()
+previous.armed !== next.armed ||
+  previous.gripper !== next.gripper ||
+  Math.abs(previous.throttle - next.throttle) >= 0.02 ||
+  Math.abs(previous.steering - next.steering) >= 0.02;
+```
+
+Los flags de pinza y armed siempre notifican al cambiar — incluso una transición de un solo frame importa. Pero throttle y steering necesitan un delta significativo antes de que el engine se moleste en avisarle a alguien.
+
+La parada de emergencia se salta este filtro con `force = true` — siempre notifica.
+
+## Armar
+
+Cuando armás, el engine llama primero a `stoppedState()`, que pone los ejes en cero mientras preserva el flag armed. Después pone `armed: true`. El resultado: nunca podés armar con la palanca ya empujada hacia adelante.
+
+```typescript
+arm(armed: boolean): void {
+  if (this.#state.armed === armed) return;
+  this.#set({ ...stoppedState(this.#state), armed }, 'arm');
+}
+```
+
+Cuando desarmás, el engine pone `armed: false`. La función `applyArmed()` envuelve el estado para el vehículo — cuando está desarmado, throttle y steering se fuerzan a `0` sin importar lo que diga la entrada del operador. La palanca puede estar donde quiera; el vehículo ve cero.
+
+## Estado efectivo
+
+`effectiveState()` aplica el filtro de armado:
+
+```typescript
+const effectiveState = (state) => applyArmed(state);
+// Armed:   devuelve el estado sin cambios
+// Disarmed: devuelve SAFE_STATE (throttle=0, steering=0, gripper='idle', armed=false)
+```
+
+Esto es lo que lee la capa de transporte al construir los `ControlFrame`. Nunca ve el estado crudo, sin filtrar.
+
+## Visual: estado de control actual
+
+Esto es lo que el engine podría mantener en un instante dado:
+
+```
+armed       true
+throttle   +0.72
+steering   -0.18
+gripper     idle
+```
+
+Este es el **único** estado. No hay segunda copia, no hay comandos pendientes, no hay historial bufferizado. El sender lee esto, el dashboard muestra esto, el vehículo obedece esto (filtrado por `applyArmed`).
+
+## Qué viene antes y después
+
+**Antes**: Los perfiles producen entrada semántica → Ownership selecciona una fuente → Engine la almacena como estado actual.
+
+**Después**: ControlSender lee el estado del engine y decide cuándo enviarlo.
+
+El engine es el punto de transferencia entre "lo que el operador está haciendo" y "lo que el navegador le dice al robot."
+
+## Verificaciones de conocimiento
+
+<KnowledgeCheck
+  question="¿ControlEngine mantiene una cola de cada posición del joystick que el operador haya presionado?"
+  answer="No. Mantiene exactamente un ControlState. Cada escritura reemplaza el valor anterior. Los comandos viejos se descartan — nunca pueden reproducirse."
+/>
+
+<KnowledgeCheck
+  question="¿Qué pasa con throttle y steering cuando desarmás?"
+  answer="applyArmed() los fuerza a 0, incluso si el operador sigue sosteniendo la palanca. El vehículo ve SAFE_STATE hasta que armés de nuevo."
+/>
+
+## Evidencia del código fuente
+
+Estos conceptos viven en:
+
+- `web/src/control/engine.ts` — Clase `ControlEngine`, `effectiveState()`, uso de `SAFE_STATE`
+- `protocol/src/control.ts` — `ControlState`, `normalizeState()`, `applyArmed()`, `SAFE_STATE`, `significantChange()`
+- `web/src/control/engine.test.ts` — tests de último-estado-gana, filtro de threshold, seguridad de armar/desarmar, parada de emergencia
+
+## Siguiente
+
+El navegador sabe lo que quiere. ControlSender decide cuándo decirlo.
+
+→ [ControlSender](/es/control/control-sender/)

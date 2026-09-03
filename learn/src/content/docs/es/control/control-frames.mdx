@@ -1,0 +1,185 @@
+---
+title: Control Frames
+description: La forma exacta de un mensaje de manejo — del estado JavaScript al formato de protocolo.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="frame" />
+
+## El problema
+
+El navegador mantiene un `ControlState` — throttle, steering, pinza, armed. El robot necesita recibir ese estado por la red. Pero ¿cómo se ve el mensaje real? ¿Qué campos lleva? ¿Quién agrega qué?
+
+Un enfoque ingenuo sería simplemente enviar `{ throttle: 0.5, steering: 0.3 }` por el WebSocket. Pero eso crea preguntas difíciles:
+
+- ¿Cómo sabe el firmware que este frame es más nuevo que el anterior?
+- ¿Cómo sabe que el frame no expiró en tránsito?
+- ¿Cómo sabe que el frame pertenece a la _sesión actual_ de control y no a un eco retrasado de una sesión que terminó hace diez segundos?
+
+Sin respuestas a estas preguntas, el robot aplicará comandos obsoletos, comandos duplicados, o comandos de la sesión equivocada. El protocolo necesita un sobre — un frame que lleve metadata junto con el estado de conducción.
+
+## La idea
+
+Un `ControlFrame` es un sobre versionado de JSON que envuelve el estado de conducción con metadata para ordenamiento, expiración, y vinculación de sesión. Cada frame que el navegador envía tiene la misma estructura. Cada frame que el firmware recibe tiene la misma estructura. El relay en el medio estampa un campo extra. Este es el contrato que mantiene al navegador, relay, y firmware de acuerdo sobre lo que el robot debe estar haciendo ahora.
+
+## La forma del frame
+
+Acá está la interfaz completa de `ControlFrame` desde `protocol.ts`:
+
+```typescript
+{
+  v: 1,                    // versión del protocolo
+  type: 'control',         // tipo de mensaje
+  seq: number,             // número de secuencia monotonamente creciente
+  sentAt: number,          // Date.now() al momento de enviar
+  ttlMs: number,           // time-to-live, por defecto 500ms
+  throttle: number,        // -1..1
+  steering: number,        // -1..1
+  gripper: Gripper,        // 'idle' | 'open' | 'close'
+  armed: boolean,
+  controlSessionId?: string // agregado por el relay, NO por el navegador
+}
+```
+
+Todos los campos son requeridos excepto `controlSessionId`, que es opcional en el cable (presente en los frames que reenvía el relay, ausente en los frames que envía el navegador). El frame extiende `ControlState`, así que lleva los cuatro ejes de conducción más los campos de metadata.
+
+## Campo por campo
+
+**`v = 1`** — Versión del protocolo. El firmware está grabado en un chip y no se puede actualizar trivialmente. El campo de versión permite que el formato del cable evolucione sin romper el firmware desplegado. Si el formato del frame cambia en una versión futura, el firmware puede revisar `v` y rechazar mensajes que no entienda.
+
+**`type = 'control'`** — Distingue este mensaje de otros tipos de mensaje: `telemetry`, `ping`, `pong`, `emergency-stop`, `controller.session`, y otros. El relay y firmware usan `type` para enrutar el mensaje al handler correcto.
+
+**`seq`** — Un número de secuencia monotonamente creciente. El firmware usa `isNewerFrame()` para rechazar frames obsoletos, duplicados, y reordenados. Si el firmware ya procesó `seq: 183`, rechazará `seq: 182` aunque ese frame llegue después. Esta es la defensa principal contra el reordenamiento de red.
+
+**`sentAt`** — `Date.now()` al momento de enviar. Se usa para el cálculo del TTL. El firmware compara `sentAt` contra su propio reloj para determinar si el frame expiró. Por eso el TTL viaja _dentro_ del frame, no como un parámetro separado — el frame lleva su propia expiración.
+
+**`ttlMs = 500`** — Cuánto tiempo es válido este frame. Después de 500ms, el firmware considera el frame expirado y detiene al robot. El valor por defecto es 500ms, definido como `CONTROL_TTL_MS` en `protocol.ts`. Este valor debe mantenerse bien por encima de `heartbeatMs` (150ms) — un margen apretado haría que el watchdog se active con jitter ordinario de Internet y Wi-Fi, no solo con una pérdida real de enlace.
+
+**`throttle`, `steering`, `gripper`, `armed`** — El estado de conducción real. Estos son los valores que el firmware aplica a los motores. El rango para `throttle` y `steering` es -1..1, `gripper` es uno de `'idle'`, `'open'`, `'close'`, y `armed` es un booleano.
+
+**`controlSessionId`** — Este es el campo crítico. El navegador **nunca** lo setea. No tiene autoridad para declarar su propia sesión. El relay lo estampa en cada frame que reenvía al dispositivo, desde el ID de sesión que generó cuando ese controlador fue promovido. Esto previene que frames retrasados de sesiones antiguas se cuelen de vuelta.
+
+## Frames del navegador vs. relay vs. dispositivo
+
+El mensaje cambia de contexto de propiedad a medida que viaja:
+
+```
+BROWSER construye:
+  { v, type, seq, sentAt, ttlMs, throttle, steering, gripper, armed }
+
+RELAY estampa:
+  + controlSessionId (de la sesión autoritativa)
+
+DISPOSITIVO recibe:
+  { ...browser frame, controlSessionId }
+```
+
+El navegador es la autoridad sobre _qué_ debe hacer el robot. El relay es la autoridad sobre _quién_ tiene permitido comandarlo. Ninguno puede hacer el trabajo del otro. El navegador no puede generar IDs de sesión porque no sabe qué sesión considera autoritativa el relay. El relay no puede inventar valores de throttle porque no sabe qué está comandando el operador. El frame es el punto de transferencia entre estas dos autoridades.
+
+## Números de secuencia — por qué existen
+
+Los paquetes de red no siempre llegan en orden. Acá hay un ejemplo concreto:
+
+```
+Paquete 181: throttle 0.5  — enviado primero, llega tercero
+Paquete 183: throttle 0.8  — enviado tercero, llega primero
+Paquete 182: throttle 0.3  — enviado segundo, llega segundo
+```
+
+El firmware los recibe en el orden: 183, 182, 181. Sin números de secuencia, aplicaría cada uno en orden de llegada, terminando en throttle 0.5 — el _primer_ comando enviado, no el _último_.
+
+Con números de secuencia, el firmware llama a `isNewerFrame()` para cada uno:
+
+```
+Frame 183: seq 183 > lastSeq 0  → aceptado. lastSeq = 183
+Frame 182: seq 182 < lastSeq 183 → rechazado (obsoleto)
+Frame 181: seq 181 < lastSeq 183 → rechazado (obsoleto)
+```
+
+El robot aplica throttle 0.8 — el último comando que el operador realmente envió. Los comandos viejos se descartan. Esto es exactamente cómo funciona `isNewerFrame()` en el código fuente:
+
+```typescript
+export const isNewerFrame = (frame: ControlFrame, lastSeq: number): boolean => frame.seq > lastSeq;
+```
+
+Mayor estricto. Una retransmisión del mismo seq también se rechaza. El seq más alto siempre gana.
+
+## TTL — la red de seguridad
+
+El TTL de 500ms es el watchdog del enlace. Si no llega ningún frame nuevo en medio segundo, el firmware asume que el controlador se fue y detiene al robot. Esto maneja la pérdida de conexión — si la pestaña del navegador crashea, el WebSocket se cae, o el relay se baja, el robot no sigue conduciendo para siempre.
+
+La verificación es simple:
+
+```typescript
+export const isFrameExpired = (frame: ControlFrame, now: number): boolean =>
+  now - frame.sentAt > frame.ttlMs;
+```
+
+El heartbeat del sender corre a 150ms — bien por debajo del TTL de 500ms. Eso le da al firmware tres ciclos de heartbeat para recibir un frame fresco antes de que el actual expire. En una conexión ordinaria con jitter normal, el watchdog nunca se activa. Solo se dispara cuando el enlace se perdió realmente.
+
+## `createControlFrame()`
+
+El protocolo provee una función helper que construye el frame desde un `ControlState`:
+
+```typescript
+export function createControlFrame(
+  state: ControlState,
+  seq: number,
+  now: number,
+  ttlMs: number = CONTROL_TTL_MS,
+): ControlFrame {
+  return {
+    v: PROTOCOL_VERSION,
+    type: 'control',
+    seq,
+    sentAt: now,
+    ttlMs,
+    throttle: state.throttle,
+    steering: state.steering,
+    gripper: state.gripper,
+    armed: state.armed,
+  };
+}
+```
+
+Copia el estado de conducción desde el engine, asigna el próximo número de secuencia, estampa la hora actual, y setea el TTL. El navegador nunca construye frames a mano — siempre pasa por esta función, que asegura que cada frame tenga la forma correcta.
+
+## Qué viene antes
+
+ControlSender decide enviar. Llama a `decideSend()` contra el ritmo y recibe una decisión: `immediate`, `rate`, `heartbeat`, o `skip`. Si la decisión no es `skip`, el sender le pide al protocolo crear un frame desde el estado actual del engine.
+
+## Qué viene después
+
+El transporte WebSocket codifica el frame como JSON y lo envía por el cable. El relay lo recibe, estampa `controlSessionId`, y lo reenvía al dispositivo. El firmware valida el frame — revisa `v`, verifica que `controlSessionId` coincida con la sesión activa, llama a `isNewerFrame()`, llama a `isFrameExpired()`, y solo entonces aplica el estado de conducción a los motores.
+
+---
+
+<KnowledgeCheck
+  question="¿Quién agrega controlSessionId a un ControlFrame?"
+  answer="El relay, nunca el navegador. El navegador construye el frame sin controlSessionId — no tiene autoridad para declarar su propia sesión. El relay lo estampa desde la sesión autoritativa que generó cuando el controlador se registró, y solo entonces reenvía el frame al dispositivo."
+/>
+
+---
+
+<KnowledgeCheck
+  question="Si el paquete 183 llega antes que el paquete 181, ¿qué pasa?"
+  answer="El isNewerFrame() del firmware acepta 183 porque su seq es mayor que el último frame aceptado. Cuando 181 llega después, isNewerFrame() lo rechaza como obsoleto — seq 181 es menor que el ya aceptado 183. El robot mantiene el estado del frame más nuevo."
+/>
+
+---
+
+### Evidencia del código fuente
+
+- `protocol.ts` — Interfaz `ControlFrame`, `createControlFrame()`, `isNewerFrame()`, `isFrameExpired()`, `CONTROL_TTL_MS`
+- `protocol.test.ts` — validación de forma de frame, tests de expiración de TTL, tests de ordenamiento de números de secuencia, opcionalidad de `controlSessionId`
+
+---
+
+### Siguiente
+
+**Tracción diferencial** — El robot recibe throttle y steering. ¿Cómo se convierte eso en dos velocidades de rueda?

@@ -10,4 +10,32 @@ import Eyebrow from '../../../../components/shared/Eyebrow.astro';
 
 Presiona una tecla, toca la pantalla, o mueve un control de videojuegos, y en bastante menos de un segundo una rueda gira. Este es ese viaje, una etapa a la vez, sobre el mismo grafo que viste en [Arquitectura del sistema](/es/start/explore-the-system/) — usa **Anterior** / **Siguiente** (o **Reproducir**) abajo. El ejemplo de abajo sigue a R2 en el perfil de control Racing, pero el mismo viaje ocurre para cualquier entrada.
 
+## Siguiendo un comando
+
+El viaje siguiente traza un comando realista: **DualSense R2 = 0.72, Left Stick X = -0.18**. Observa cómo se transforma en cada etapa:
+
+1. **Entrada física** — valor analógico de R2 y posición del stick leídos por la Gamepad API
+2. **Perfil** — el perfil Racing mapea R2 a throttle forward, Left Stick X a steering
+3. **Propiedad** — el gamepad es la fuente activa
+4. **ControlEngine** — almacena throttle 0.72, steering -0.18 como estado deseado actual
+5. **ControlSender** — decide "rate" (cambio significativo, dentro del presupuesto)
+6. **ControlFrame** — construye `{seq, sentAt, ttlMs, state}`
+7. **Relevo** — marca `controlSessionId`, reenvía al dispositivo
+8. **Firmware** — valida sesión, seq, aplica estado
+9. **Mezcla diferencial** — left = 0.54, right = 0.90
+10. **ACK** — el firmware confirma "ya hice eso"
+
 <Explorer locale="es" storyId="r2-to-motors" initialLevel="technical" />
+
+## Profundiza
+
+Cada etapa arriba tiene su propia lección:
+
+- [Entrada del navegador](/es/control/browser-input/) — cómo la entrada física se convierte en intención normalizada
+- [Control de entrada](/es/control/input-ownership/) — por qué solo una fuente maneja a la vez
+- [Perfiles del controlador](/es/control/controller-profiles/) — cómo los valores crudos se mapean a acciones semánticas
+- [ControlEngine](/es/control/control-engine/) — la única fuente de verdad del navegador
+- [ControlSender](/es/control/control-sender/) — cuándo el estado sale por la red
+- [Ritmo y heartbeats](/es/control/rhythm-heartbeats/) — las reglas de temporización
+- [Control Frames](/es/control/control-frames/) — el formato de red
+- [Tracción diferencial](/es/control/differential-drive/) — de estado a matemática de ruedas

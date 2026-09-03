@@ -42,6 +42,9 @@ export interface ConceptNode {
   readonly group?: string;
   readonly sourceRefs?: readonly SourceRef[];
   readonly facts?: readonly Fact[];
+  /** Optional deep-dive lesson slug (without leading /). When present, the
+   * passport renders a "Learn more →" link to /{slug}/. */
+  readonly learnSlug?: string;
 }
 
 export type EdgeKind = 'flow' | 'informs' | 'ack';

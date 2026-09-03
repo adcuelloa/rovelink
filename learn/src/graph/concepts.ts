@@ -66,6 +66,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented'],
+    learnSlug: 'control/browser-input',
     sourceRefs: [
       { path: 'web/src/control/keyboard.ts', symbol: 'listenKeyboard', kind: 'source' },
       { path: 'web/src/control/keyboard.ts', symbol: 'actionForKey', kind: 'source' },
@@ -78,6 +79,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented'],
+    learnSlug: 'control/browser-input',
     sourceRefs: [
       { path: 'web/src/control/gamepad.ts', symbol: 'listenGamepad', kind: 'source' },
       { path: 'web/src/control/controls.ts', symbol: 'readSemantic', kind: 'source' },
@@ -98,6 +100,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented', 'rationale'],
+    learnSlug: 'control/input-ownership',
     sourceRefs: [
       { path: 'web/src/control/ownership.ts', symbol: 'InputOwnership', kind: 'source' },
       { path: 'web/src/control/ownership.test.ts', kind: 'test' },
@@ -109,6 +112,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented', 'alternative'],
+    learnSlug: 'control/controller-profiles',
     sourceRefs: [
       { path: 'web/src/control/profile.ts', symbol: 'evaluateProfile', kind: 'source' },
       { path: 'web/src/control/profile.ts', symbol: 'RACING_PROFILE', kind: 'source' },
@@ -121,6 +125,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented'],
+    learnSlug: 'control/control-engine',
     sourceRefs: [
       { path: 'web/src/control/engine.ts', symbol: 'ControlEngine', kind: 'source' },
       { path: 'protocol/src/control.ts', symbol: 'normalizeState', kind: 'source' },
@@ -133,6 +138,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented'],
+    learnSlug: 'control/control-sender',
     sourceRefs: [
       { path: 'web/src/transport/sender.ts', symbol: 'ControlSender', kind: 'source' },
       { path: 'web/src/transport/sender.test.ts', kind: 'test' },
@@ -144,6 +150,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'browser',
     facts: ['implemented', 'rationale'],
+    learnSlug: 'control/rhythm-heartbeats',
     sourceRefs: [
       { path: 'web/src/transport/rhythm.ts', symbol: 'decideSend', kind: 'source' },
       { path: 'web/src/transport/rhythm.ts', symbol: 'DEFAULT_RHYTHM', kind: 'source' },
@@ -166,6 +173,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'cloud-relay',
     facts: ['implemented', 'rationale'],
+    learnSlug: 'control/control-frames',
     sourceRefs: [
       { path: 'protocol/src/protocol.ts', symbol: 'ControlFrame', kind: 'source' },
       { path: 'protocol/src/protocol.ts', symbol: 'CONTROL_TTL_MS', kind: 'source' },
@@ -239,6 +247,7 @@ export const CONCEPTS: readonly ConceptNode[] = [
     introducedAt: 'technical',
     group: 'robot',
     facts: ['implemented'],
+    learnSlug: 'control/differential-drive',
     sourceRefs: [
       { path: 'protocol/src/mix.ts', symbol: 'differentialMix', kind: 'source' },
       { path: 'protocol/src/mix.test.ts', kind: 'test' },

@@ -1,0 +1,179 @@
+---
+title: Controller Profiles
+description: How raw gamepad values become semantic throttle, steering, and gripper commands.
+---
+
+import PipelinePosition from '../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="profile" />
+
+## The problem
+
+The rest of RoveLink should never need to know "R2 = forward". It should receive semantic intent: _throttle_, _steering_, _gripper_. Different controllers have different physical layouts — the DualSense has triggers, a racing wheel has a pedal, a custom board might wire buttons differently. The profile layer maps whatever physical controls the operator uses to a common shape that the rest of the pipeline understands.
+
+Without this layer, every downstream component would need to know which button means what. With it, they only see `throttle: 0.72` and `steering: -0.18`. The physical source is irrelevant.
+
+## The idea
+
+A `ControllerProfile` is **data**, not code. It maps physical controls to semantic actions. `evaluateProfile()` takes raw semantic values and the active profile, and produces a `GamepadInput` — the same shape the rest of the pipeline consumes.
+
+This means adding a new controller layout doesn't require writing new code. You define a new data object, and the same `evaluateProfile` function processes it.
+
+## Raw vs. semantic
+
+The browser's Gamepad API gives us raw values:
+
+- **`axes[]`**: float values indexed by position. `axes[0]` is the left stick X, `axes[1]` is the left stick Y, and so on — but only because the W3C Standard Gamepad layout says so.
+- **`buttons[]`**: objects with `.pressed` (boolean) and `.value` (0–1 analog depth). `buttons[7]` is R2, but again, only by convention.
+
+These raw indices are useless for reasoning about robot intent. RoveLink's `controls.ts` defines semantic names:
+
+- **`AxisControl`**: `LeftStickX`, `LeftStickY`, `RightStickX`, `RightStickY`
+- **`ButtonControl`**: `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Cross`, `Circle`, `Square`, `Triangle`, `Create`, `Options`, `DPadUp`, `DPadDown`, `DPadLeft`, `DPadRight`
+
+The function `readSemantic(reading)` converts a raw `GamepadReading` into a `SemanticValues` record — a single number per named control. Buttons report 0 (released) or their analog depth. Axes report their raw float. From here on, nothing touches raw indices.
+
+```typescript
+// SemanticValues is just: Record<PhysicalControl, number>
+// One number per named control, every frame.
+const values = readSemantic(rawReading);
+// values.R2 might be 0.80
+// values.LeftStickX might be -0.15
+```
+
+## The Racing profile
+
+The built-in Racing profile (`RACING_PROFILE` in `profile.ts`) maps controls like this:
+
+| Action             | Binding         | Type              |
+| ------------------ | --------------- | ----------------- |
+| Throttle (forward) | R2              | ButtonControl     |
+| Throttle (reverse) | L2              | ButtonControl     |
+| Steering           | LeftStickX      | AxisControl       |
+| Gripper open       | L1              | ButtonControl     |
+| Gripper close      | R1              | ButtonControl     |
+| Arm                | Options         | ButtonControl     |
+| Disarm             | Create          | ButtonControl     |
+| Emergency Stop     | L3 + R3 (chord) | ButtonControl × 2 |
+
+Notice that throttle uses **split mode** — two buttons instead of one axis. The operator pulls R2 to go forward, pulls L2 to go in reverse. This is a common layout for racing-style driving.
+
+## Split throttle
+
+Split throttle subtracts the reverse button from the forward button:
+
+```
+throttle = clamp(forward - reverse, -1, 1)
+```
+
+Some concrete examples with the Racing profile:
+
+| R2   | L2   | Result                |
+| ---- | ---- | --------------------- |
+| 0.80 | 0.00 | `+0.80` (forward)     |
+| 0.00 | 0.30 | `-0.30` (reverse)     |
+| 0.50 | 0.20 | `+0.30` (net forward) |
+| 0.70 | 0.70 | `0.00` (cancels out)  |
+
+The `clamp` ensures the result stays in the valid range even if both triggers are fully pressed. The Racing profile's test suite verifies this: `R2: 0.7, L2: 0.7` produces exactly `0`.
+
+## The Stick profile
+
+The Stick profile (`STICK_PROFILE`) uses a single axis for throttle instead:
+
+| Action   | Binding    | Invert | Deadzone |
+| -------- | ---------- | ------ | -------- |
+| Throttle | LeftStickY | yes    | 0.12     |
+| Steering | LeftStickX | no     | 0.12     |
+
+The **invert** flag is critical. The Gamepad API reports `LeftStickY = -1` when the stick is pushed forward (toward the top). But RoveLink convention is that forward throttle is positive. So `invert: true` flips the sign: push forward → `+1` throttle.
+
+Push the stick backward → `LeftStickY = +1` → inverted to `-1` → reverse throttle.
+
+## Deadzone
+
+Every analog stick has a small resting error — it rarely reads exactly `0.00` when released. The deadzone filters this noise out, and rescales values outside the zone so there's no jump at the boundary.
+
+The default deadzone is `0.12` (12% of the stick's range):
+
+```typescript
+function applyDeadzone(value, zone) {
+  if (Math.abs(value) <= zone) return 0;
+  return (Math.sign(value) * (Math.abs(value) - zone)) / (1 - zone);
+}
+```
+
+Why rescale instead of just clamping? Without rescale, a value of `0.13` (just outside a `0.12` zone) would jump to `0.13` — nearly a 13% output from a gentle touch. With rescale, that same input produces `0.01` (about 1%). The output starts at zero and scales linearly from there. This is what makes a worn gamepad tolerable to drive.
+
+If the deadzone is set to 1.0 or above, `applyDeadzone` returns `0` for everything — the stick is effectively disabled.
+
+## Safety by type
+
+Arm, Disarm, gripper open/close, and Emergency Stop are always `ButtonControl` at the TypeScript type level. An `AxisControl` can literally never be assigned to them.
+
+This isn't just convention — it's enforced by the compiler. The `ControllerProfile` interface declares:
+
+```typescript
+arm: ButtonControl;
+disarm: ButtonControl;
+gripperOpen: ButtonControl;
+gripperClose: ButtonControl;
+emergencyStop: {
+  a: ButtonControl;
+  b: ButtonControl;
+}
+```
+
+If you tried to write `{ arm: 'LeftStickX' }`, TypeScript would reject it. You cannot construct a configuration where an analog stick arms the robot. The type system is the safety net.
+
+## Edge detection
+
+Instant actions — arm, disarm, emergency stop — fire on the **press edge**, not while held. `newPresses()` detects transitions from released to pressed between consecutive frames. Holding arm for three frames doesn't arm the robot three times; it arms once, on the frame the button first goes down.
+
+```typescript
+// Only fires when current[action] is true AND previous[action] was false
+newPresses(previousButtons, currentButtons);
+```
+
+The gripper is intentionally excluded from edge detection. It behaves like the keyboard: the gripper stays open while L1 is held, and closes while R1 is held. It's a continuous action, not a toggle.
+
+## Both held = idle
+
+If the operator holds both L1 (open) and R1 (close) simultaneously, the gripper resolves to **idle**. This is an ambiguous preference — the operator is doing something contradictory — so the safe response is to do nothing.
+
+```typescript
+if (buttons.closeGripper && buttons.openGripper) return 'idle';
+```
+
+This is tested in both profiles: `L1: 1, R1: 1` always produces `'idle'`.
+
+## Knowledge checks
+
+<KnowledgeCheck
+  question="With the Racing profile, if R2=0.72 and L2=0.00, what throttle value reaches the engine?"
+  answer="0.72 (forward). Split throttle subtracts reverse from forward: 0.72 - 0.00 = 0.72."
+/>
+
+<KnowledgeCheck
+  question="Why can't you wire the left analog stick to arm the robot?"
+  answer="Arm is typed as ButtonControl at the TypeScript level. An AxisControl like LeftStickX can never be assigned to it — the compiler rejects the binding before the code ever runs."
+/>
+
+## Source evidence
+
+These concepts live in:
+
+- `web/src/control/profile.ts` — `RACING_PROFILE`, `STICK_PROFILE`, `evaluateProfile()`, `toCustom()`
+- `web/src/control/controls.ts` — `AxisControl`, `ButtonControl`, `SemanticValues`, `readSemantic()`
+- `web/src/control/mapping.ts` — `applyDeadzone()`, `newPresses()`, `gripperFromButtons()`, `DEFAULT_DEADZONE`
+- `web/src/control/profile.test.ts` — tests for split throttle, stick inversion, edge detection, both-held-idle
+
+## Next
+
+Now we have semantic throttle and steering values. What does the browser actually do with them?
+
+→ [ControlEngine](/control/control-engine/)

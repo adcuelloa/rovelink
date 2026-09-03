@@ -1,0 +1,174 @@
+---
+title: Ritmo y heartbeats
+description: Las reglas de temporización que mantienen al robot responsive sin inundar la red.
+---
+
+import PipelinePosition from '../../../../components/shared/PipelinePosition.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Control</Eyebrow>
+
+<PipelinePosition current="rhythm" />
+
+## El problema
+
+Dos extremos son igual de malos.
+
+Enviar continuamente desperdicia ancho de banda, hace más difícil razonar sobre el enlace, y arriesga saturar al firmware con frames redundantes. Enviar solo ante cambios de estado hace que el robot no sepa que seguís ahí si sostenés la palanca quieta.
+
+Considerá un gamepad sostenido en una posición fija. El engine resuelve los mismos valores cientos de veces por segundo. Enviar cada resolución es desperdiciar. Pero si no enviás _nada_ mientras sostenés la palanca, el watchdog TTL del firmware empieza a contar — y si llega a cero, el robot asume que se perdió el control y se detiene.
+
+El robot necesita prueba periódica de que el control está vivo. El operador necesita respuesta de baja latencia cuando la entrada cambia. Estos dos requisitos tiran en direcciones opuestas, y la función de ritmo existe para reconciliarlos.
+
+## La idea
+
+Un ritmo con cuatro modos: **immediate**, **rate**, **heartbeat**, y **skip**.
+
+Cada modo responde a una pregunta diferente sobre el estado actual, y juntos producen un flujo de frames que es tanto responsive como eficiente. La función de ritmo es una decisión pura — toma los estados actual y anterior, aplica unas reglas, y devuelve un veredicto. Sin timers, sin efectos secundarios, sin conocimiento de la red.
+
+## Las cuatro decisiones
+
+### Immediate — enviar ahora
+
+Algunas situaciones no pueden esperar una ventana de rate-limit o un tick de heartbeat:
+
+- **Primer envío ever** — `previous === null`. No hay baseline para comparar, así que se envía inmediatamente.
+- **Armed cambió** — armar o desarmar. El firmware debe saber de esta transición al instante.
+- **Pinza cambió** — el estado de la pinza es binario y crítico para la acción. La demora es inaceptable.
+- **Pasando a idle** — estaba moviéndose, ahora paró. La transición de frenado necesita entrega inmediata.
+
+Immediate significa exactamente lo que parece: el frame sale por el cable ahora, pase lo que pase.
+
+### Rate — cambio significativo, con throttle
+
+Cuando un eje cambia significativamente pero el último envío fue reciente, entra el rate-limiting:
+
+- **Cambio significativo** — el eje se movió más de `threshold` (0.02, o 2% del rango completo).
+- **Presupuesto de rate disponible** — pasó suficiente tiempo: `sinceLastMs >= 1000 / hzMax`.
+
+Con `hzMax = 30`, el tiempo mínimo entre paquetes de movimiento es 33.3ms. Si el eje cambió significativamente pero el último frame salió hace 10ms, el sender hace skip de esta actualización y espera a la próxima ventana de rate. Esto previene inundar el cable con micro-ajustes mientras sigue capturando cambios de entrada significativos.
+
+### Heartbeat — mantener vivo el enlace
+
+No cambió nada, pero el robot debe seguir sabiendo que el control está activo:
+
+- Estado **armed pero estable** — palanca quieta, sin transiciones.
+- Re-enviado cada `heartbeatMs` = 150ms.
+- Esto alimenta el watchdog TTL del firmware, probando que el operador sigue conectado.
+
+El heartbeat es el pulso silencioso del enlace de control. No lleva nueva intención — lleva prueba de presencia continua.
+
+### Skip — no enviar
+
+Algunas situaciones justifican silencio:
+
+- **Desarmado e inactivo** — no tiene sentido enviar "no está pasando nada". El próximo evento de armado o entrada disparará un envío inmediato.
+- **Rate-limited y muy pronto** — se detectó cambio significativo, pero el presupuesto de rate no se repuso. Esperar a la próxima ventana.
+- **Heartbeat aún no vencido** — estado estable y armed, pero pasaron menos de 150ms desde el último envío.
+
+Skip es el default. La mayoría del tiempo, el ritmo dice "quedate callado" — y es la decisión correcta.
+
+## Constantes
+
+Desde `rhythm.ts`:
+
+```
+hzMax: 30        → 33.3ms mínimo entre paquetes de movimiento
+heartbeatMs: 150 → período para re-enviar estado estable
+threshold: 0.02  → cambio mínimo de eje para justificar un paquete
+```
+
+Estos valores están sintonizados para el protocolo real. `hzMax` iguala la tasa de frames esperada por el firmware. `heartbeatMs` está bien por debajo del watchdog TTL de 500ms del firmware. `threshold` filtra ruido del jitter de la palanca analógica.
+
+## Línea de tiempo visual
+
+```
+0ms      la entrada cambia → SEND (immediate)
+33ms     otro cambio diminuto → rate-limited (muy pronto, skip)
+50ms     mismo estado, armed → heartbeat aún no (skip)
+150ms    mismo estado, todavía armed → HEARTBEAT
+183ms    otro cambio diminuto → rate-limited (pasaron 33ms, SEND)
+300ms    mismo estado, armed → HEARTBEAT
+...
+```
+
+El patrón es claro: ráfagas de envíos inmediatos en transiciones, envíos con throttle durante movimiento sostenido, y heartbeats silenciosos cuando no cambia nada. El ritmo se adapta al comportamiento del operador en tiempo real.
+
+## Por qué existe el heartbeat
+
+El firmware tiene un watchdog TTL (`CONTROL_TTL_MS = 500ms`). Si no llega ningún frame válido en 500ms, el robot asume que se perdió el control y se detiene.
+
+El heartbeat a 150ms provee amplio margen. Tres heartbeats caben en 450ms — eso es 50ms de margen antes de que el watchdog se active. Incluso si dos heartbeats consecutivos se pierden por jitter de red, el tercero llega a tiempo.
+
+Este margen es deliberado. Condiciones ordinarias de red — retransmisiones de Wi-Fi, colas del router, demoras del scheduler del navegador — pueden sumar fácilmente 50-100ms de jitter. La frecuencia del heartbeat mantiene el enlace seguro bajo condiciones normales mientras se mantiene bien por debajo del costo de ancho de banda de enviar continuamente.
+
+## El margen
+
+`heartbeatMs` (150ms) debe mantenerse bien por debajo de `CONTROL_TTL_MS` (500ms).
+
+Si `heartbeatMs` fuera 600ms, el jitter ordinario de red podría activar el watchdog. Un solo heartbeat retrasado empujaría la brecha más allá de 500ms, y el robot se detendría aunque el operador siga conduciendo activamente. La ratio actual — 150ms de heartbeat vs 500ms de TTL — da un margen de 3:1 que maneja las condiciones de red del mundo real con gracia.
+
+## Skip por desarmado + idle
+
+Cuando está desarmado y no se mueve, el sender hace skip por completo. Sin desperdiciar ancho de banda en "no está pasando nada."
+
+Este es el estado silencioso. El operador no armó el robot, no tocó las palancas, no está enviando comandos. El watchdog TTL del firmware no está corriendo porque no hay sesión armada. No hay nada que probar, nada que enviar.
+
+El próximo comando de armado o evento de entrada dispara un envío inmediato, y el ciclo de ritmo empieza de nuevo.
+
+## La función de decisión
+
+Acá está el flujo real de `decideSend()`:
+
+```
+if previous === null       → immediate   (primer envío, sin baseline)
+if armed changed           → immediate   (armar/desarmar es crítico)
+if gripper changed         → immediate   (la acción de pinza es binaria)
+if was moving, now idle    → immediate   (transición de frenado)
+if significant change
+  AND rate budget          → rate        (envío con throttle)
+if significant change
+  BUT rate budget exceeded → skip        (esperar próxima ventana)
+if disarmed AND idle       → skip        (nada que enviar)
+if heartbeat interval
+  elapsed                  → heartbeat   (mantener watchdog alimentado)
+else                       → skip        (default: quedarse callado)
+```
+
+El orden importa. Las verificaciones de immediate vienen primero — siempre ganan. Las verificaciones de rate vienen después. Heartbeat es el fallback para estado armed estable. Skip es el else final.
+
+Este ordenamiento garantiza que las transiciones críticas para la seguridad nunca se retrasen por rate-limiting o temporizado de heartbeat. Si el estado de armado cambia, el frame sale inmediatamente — punto.
+
+## Conexión con el firmware
+
+El heartbeat existe porque el robot debe seguir recibiendo evidencia de que el control sigue vivo. El firmware usa esos frames válidos repetidos para decidir si el control está activo. Cubriremos el mecanismo completo de TTL en [Seguridad de conexión](/labs/ttl/).
+
+La idea clave: el heartbeat no se trata de enviar nueva información. Se trata de probar que la información anterior sigue siendo válida. "Todavía quiero 50% de throttle" es el mensaje, y el ritmo asegura que el firmware nunca pase tanto tiempo sin escucharlo.
+
+---
+
+<KnowledgeCheck
+  question="¿Por qué RoveLink sigue enviando frames si la palanca no se movió?"
+  answer="El heartbeat mantiene alimentado el watchdog TTL del firmware. Sin re-envíos periódicos, el robot asumiría que se perdió el control y se detendría, aunque el operador siga conduciendo activamente. El heartbeat a 150ms prueba presencia continua bien dentro de la ventana TTL de 500ms del firmware."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Cuál es el tiempo mínimo entre dos paquetes de movimiento?"
+  answer="1000 / 30 ≈ 33.3ms, controlado por hzMax = 30. Esto previene inundar el cable con micro-ajustes por jitter de la palanca analógica mientras sigue capturando cambios de entrada significativos a una tasa que el firmware puede procesar."
+/>
+
+---
+
+### Evidencia del código fuente
+
+- `rhythm.ts` — `decideSend()`, constantes `DEFAULT_RHYTHM` (`hzMax`, `heartbeatMs`, `threshold`)
+- `rhythm.test.ts` — cobertura de decisiones para immediate, rate, heartbeat, skip
+
+---
+
+### Siguiente
+
+**Control Frames** — El sender decide enviar. ¿Cómo se ve el mensaje real?
