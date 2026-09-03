@@ -1,15 +1,17 @@
 ---
 title: Laboratorio de flujo de control
 description: Maneja un robot simulado y mira cada etapa del pipeline reaccionar en vivo.
-eyebrow: Laboratorio
 ---
 
-import { ControlPipelineLab } from '../../../../components/ControlPipelineLab.tsx';
+import ControlLabWrapper from '../../../../components/ControlPipelineLabWrapper.astro';
 import { ES_UI } from '../../../../i18n/es.ts';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+
+<Eyebrow>Laboratorio</Eyebrow>
 
 Maneja con **WASD o las flechas** (Espacio para detener, Q/E para la pinza, Z para armar/desarmar — el mapeo real de teclado de RoveLink), el panel táctil en pantalla, o un control real conectado y en movimiento. Todo lo que está antes de **CONTROLENGINE**, **CONTROLSENDER**, la propiedad de entrada, y el manejo de teclado/control es el código real de RoveLink sin modificar — solo la red, el relevo y el firmware después de ese punto están <span className="rl-badge-sim">SIMULADOS</span>.
 
-<ControlPipelineLab client:only="react" locale="es" ui={ES_UI} />
+<ControlLabWrapper locale="es" ui={ES_UI} />
 
 ## Qué estás viendo
 

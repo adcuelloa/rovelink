@@ -1,0 +1,20 @@
+---
+/**
+ * Wraps ControlPipelineLab in an InteractiveWorkspace frame with
+ * fullscreen support. Used by the MDX pages.
+ */
+import InteractiveWorkspace from './shared/InteractiveWorkspace.astro';
+import { ControlPipelineLab } from './ControlPipelineLab.tsx';
+
+interface Props {
+  readonly locale: 'en' | 'es';
+  readonly ui: Record<string, unknown>;
+}
+
+const { locale, ui } = Astro.props;
+const title = locale === 'es' ? 'Laboratorio de flujo de control' : 'Control Flow Lab';
+---
+
+<InteractiveWorkspace title={title} class="rl-lab-workspace">
+  <ControlPipelineLab client:only="react" locale={locale} ui={ui} />
+</InteractiveWorkspace>

@@ -214,6 +214,7 @@ function ExplorerInner({
             onNodesChange={(changes) => setNodes((current) => applyNodeChanges(changes, current))}
             onNodeClick={(_, node) => focusNode(node.id)}
             fitView
+            minZoom={0.1}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={20} />

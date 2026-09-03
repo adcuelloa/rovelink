@@ -1,11 +1,15 @@
 /*
- * RoveLink Learn visual layer: a restrained adaptation of the production
- * dashboard's carbon/dark, industrial-technical language — not a copy of
- * its CSS. Sodium/orange accent, mono for machine data, calm diagram
- * semantics, strong state hierarchy. No gradients-as-decoration, no glass,
- * no particles.
+ * RoveLink Learn visual layer — RoveLink-specific semantic tokens and
+ * interactive component styling. The shell (sidebar, header, TOC, hero,
+ * typography, dark/light surfaces) is owned by starlight-theme-black.
+ * Only interactive/experimental/custom component styles live here.
  */
 
+/* --- RoveLink semantic tokens -------------------------------------------
+ * Brand accent plus product-domain colors (control state, simulation,
+ * safety). Neutral chrome (surface/border/muted text/radius) is aliased to
+ * starlight-theme-black's own variables below, never a second independent
+ * palette. */
 :root {
   --rl-accent: #ff8a1e;
   --rl-accent-dim: #a85f19;
@@ -13,55 +17,37 @@
   --rl-ok: #35c46a;
   --rl-error: #ef4444;
   --rl-info: #4fa3ff;
-  /* Canonical semantic aliases (design-token layer, spec §14) — point at the
-     same values components already use above, never a second arbitrary hex. */
   --rl-success: var(--rl-ok);
   --rl-danger: var(--rl-error);
-  --rl-mono: 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+  --rl-mono: 'Geist Mono', 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
 
   --sl-color-accent-low: #3a2410;
   --sl-color-accent: var(--rl-accent-dim);
   --sl-color-accent-high: var(--rl-accent);
 
-  --rl-radius: 8px;
-  --rl-radius-sm: 6px;
-}
-
-:root[data-theme='dark'],
-:root:not([data-theme='light']) {
-  --rl-bg: var(--sl-color-bg);
-  --rl-surface: #14171c;
-  --rl-surface-raised: #1b1f26;
-  --rl-surface-hover: #232833;
-  --rl-border: #2a2f38;
-  --rl-border-strong: #3a4049;
-  --rl-text-dim: #9aa4b2;
+  /* Neutral chrome — aliases onto Black's tokens, not a second palette. */
+  --rl-bg: var(--background);
+  --rl-surface: var(--background);
+  --rl-surface-raised: var(--secondary);
+  --rl-surface-hover: var(--accent);
+  --rl-border: var(--border);
+  --rl-border-strong: var(--gray-5);
+  --rl-text-dim: var(--muted-foreground);
+  --rl-radius: var(--radius);
+  --rl-radius-sm: calc(var(--radius) - 2px);
   --rl-accent-soft: color-mix(in srgb, var(--rl-accent) 16%, transparent);
-  --rl-minimap-mask: rgba(0, 0, 0, 0.55);
+  --rl-minimap-mask: color-mix(in srgb, var(--background) 55%, transparent);
 }
 
-/*
- * Light mode is a deliberately separate design, not a dark-mode inversion:
- * clean technical-documentation white/graphite rather than carbon. Sodium
- * accent stays identical across both — it is the one constant.
- */
 :root[data-theme='light'] {
-  --rl-bg: var(--sl-color-bg);
-  --rl-surface: #ffffff;
-  --rl-surface-raised: #f6f7f8;
-  --rl-surface-hover: #eef0f2;
-  --rl-border: #e2e4e9;
-  --rl-border-strong: #cbd0d8;
-  --rl-text-dim: #5b6472;
   --rl-accent-soft: color-mix(in srgb, var(--rl-accent) 12%, transparent);
-  --rl-minimap-mask: rgba(255, 255, 255, 0.6);
 
   --sl-color-accent-low: #ffe4c2;
   --sl-color-accent: #b5590f;
   --sl-color-accent-high: #7a3c09;
 }
 
-/* --- Fact badges (Fact Classification) ------------------------------- */
+/* --- Fact badges ------------------------------------------------------- */
 .fact-badge {
   display: inline-block;
   font-family: var(--rl-mono);
@@ -101,6 +87,16 @@
   border-radius: 3px;
   border: 1px solid var(--rl-border, #ccc);
   color: var(--rl-text-dim, #666);
+}
+
+/* --- Eyebrow (page category label, lives in content, not PageTitle) ---- */
+.rl-eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rl-accent);
 }
 
 /* --- Node passport ----------------------------------------------------- */
@@ -171,19 +167,25 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 1rem;
   border: 1px solid var(--rl-border, #ddd);
-  border-radius: 8px;
+  border-radius: var(--rl-radius);
   background: var(--rl-surface, #0e1116);
   overflow: hidden;
 }
 .rl-explorer__canvas {
   position: relative;
-  height: 560px;
+  /* React Flow sizes itself to 100% of this element via an inline style;
+     that only resolves against a *definite* height, so this must be
+     `height`, not `min-height` — a min-height on an auto-sized ancestor
+     lets the percentage child collapse to 0 (a classic React Flow
+     "blank canvas" bug), and it reproduced only at some viewport sizes
+     since the auto-height/stretch circularity is layout-timing dependent. */
+  height: clamp(32rem, 68vh, 52rem);
 }
 .rl-explorer__side {
   border-left: 1px solid var(--rl-border, #ddd);
   padding: 1rem;
   overflow-y: auto;
-  max-height: 640px;
+  max-height: clamp(32rem, 68vh, 52rem);
   background: var(--rl-surface-raised, #fff);
 }
 .rl-explorer__toolbar {
@@ -198,7 +200,7 @@
 .rl-levels {
   display: inline-flex;
   border: 1px solid var(--rl-border, #ccc);
-  border-radius: 6px;
+  border-radius: var(--rl-radius-sm);
   overflow: hidden;
 }
 .rl-levels button {
@@ -220,7 +222,7 @@
   font-size: 0.75rem;
   padding: 0.3rem 0.6rem;
   border: 1px solid var(--rl-border, #ccc);
-  border-radius: 6px;
+  border-radius: var(--rl-radius-sm);
   background: transparent;
   cursor: pointer;
   color: inherit;
@@ -234,7 +236,7 @@
   font-size: 0.8rem;
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--rl-border, #ccc);
-  border-radius: 6px;
+  border-radius: var(--rl-radius-sm);
   background: transparent;
   color: inherit;
   min-width: 10rem;
@@ -309,10 +311,10 @@
   background: color-mix(in srgb, var(--rl-accent) 15%, transparent);
 }
 
-/* --- Story / guided tour -------------------------------------------------- */
+/* --- Story / guided tour ------------------------------------------------ */
 .rl-story {
   border: 1px solid var(--rl-border, #ddd);
-  border-radius: 8px;
+  border-radius: var(--rl-radius);
   padding: 1rem;
   background: var(--rl-surface-raised, #fff);
 }
@@ -329,7 +331,7 @@
   opacity: 0.7;
 }
 
-/* --- Control Pipeline Lab -------------------------------------------------- */
+/* --- Control Pipeline Lab ----------------------------------------------- */
 .rl-lab {
   display: flex;
   flex-direction: column;
@@ -376,7 +378,7 @@
 
 .rl-panel {
   border: 1px solid var(--rl-border, #ddd);
-  border-radius: 8px;
+  border-radius: var(--rl-radius);
   padding: 0.9rem 1rem;
   background: var(--rl-surface-raised, #fff);
 }
@@ -398,7 +400,7 @@
   font-family: var(--rl-mono);
   font-size: 0.78rem;
   padding: 0.4rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--rl-radius-sm);
   border: 1px solid var(--rl-border, #ccc);
   background: transparent;
   cursor: pointer;
@@ -465,6 +467,7 @@
   transition: left 0.12s linear;
 }
 
+/* --- Responsive: explorer lab ------------------------------------------- */
 @media (max-width: 900px) {
   .rl-explorer {
     grid-template-columns: 1fr;
@@ -476,6 +479,27 @@
   }
 }
 
+/* --- Pipeline responsive ------------------------------------------------ */
+.rl-lab__bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .rl-lab__pipeline {
+    flex-direction: column;
+  }
+  .rl-stage {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .rl-lab__bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Reduced motion ----------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .rl-packet,
   .rl-stage,
@@ -484,89 +508,7 @@
   }
 }
 
-/* ========================================================================
- * Editorial typography — restrained heading scale, comfortable measure.
- * Starlight's own --sl-content-width (45rem) already gives lesson prose a
- * good line length; this section only tones down the marketing-hero scale
- * inherited from Starlight's default Hero component.
- * ==================================================================== */
-.hero h1 {
-  font-size: clamp(1.9rem, 1.2rem + 2.6vw, 2.75rem) !important;
-  letter-spacing: -0.01em;
-}
-.hero .tagline {
-  font-size: clamp(1rem, 0.85rem + 0.6vw, 1.15rem) !important;
-  max-width: 42ch;
-}
-.hero .actions a {
-  transition: none;
-}
-@media (min-width: 50rem) {
-  .hero {
-    padding-block: clamp(1.75rem, 1rem + 4vmin, 3.5rem) !important;
-  }
-}
-
-/* Explorer/Lab pages intentionally run wider than lesson prose (spec §3/§13):
-   widen the content column only when it actually contains one of those
-   components, rather than a per-page frontmatter flag. */
-.sl-container:has(.rl-explorer),
-.sl-container:has(.rl-lab) {
-  max-width: min(76rem, 100%);
-}
-
-/* ========================================================================
- * Sidebar — calm hierarchy, active state via more than color, hairline
- * separators between groups instead of card chrome.
- * ==================================================================== */
-nav.sidebar .top-level > li + li {
-  margin-top: 1.1rem !important;
-  padding-top: 0.85rem;
-  border-top: 1px solid var(--rl-border);
-}
-nav.sidebar .top-level > li:first-child {
-  padding-top: 0;
-}
-nav.sidebar summary .group-label .large {
-  font-size: 0.72rem !important;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--rl-text-dim);
-}
-nav.sidebar a {
-  border-radius: var(--rl-radius-sm);
-  transition: background-color 0.1s ease;
-}
-nav.sidebar a:hover {
-  background-color: var(--rl-surface-hover);
-}
-nav.sidebar a[aria-current='page'] {
-  position: relative;
-  background-color: var(--rl-accent-soft) !important;
-  color: var(--rl-accent) !important;
-  box-shadow: inset 2px 0 0 var(--rl-accent);
-}
-
-/* ========================================================================
- * Right-side table of contents — quiet, rail-based active indication.
- * ==================================================================== */
-.right-sidebar-panel a {
-  border-inline-start: 2px solid transparent;
-  padding-inline-start: 0.65rem !important;
-  transition:
-    color 0.1s ease,
-    border-color 0.1s ease;
-}
-.right-sidebar-panel a[aria-current='true'] {
-  border-inline-start-color: var(--rl-accent);
-  color: var(--sl-color-white) !important;
-  font-weight: 500;
-}
-
-/* ========================================================================
- * Accessibility & motion
- * ==================================================================== */
+/* --- Accessibility & focus ---------------------------------------------- */
 :focus-visible {
   outline: 2px solid var(--rl-accent);
   outline-offset: 2px;
@@ -582,12 +524,197 @@ nav.sidebar a[aria-current='page'] {
   }
 }
 
-/* ========================================================================
- * Mobile — keep the header title/top-nav row from overflowing on very
- * narrow phones; the top nav itself is already hidden below `md` (Header.astro).
- * ==================================================================== */
-@media (max-width: 400px) {
-  .site-title span {
-    max-width: 9.5rem;
+/* --- Interactive workspace frame ---------------------------------------- */
+.rl-workspace {
+  position: relative;
+  border: 1px solid var(--rl-border, #ddd);
+  border-radius: var(--rl-radius);
+  background: var(--rl-surface, #0e1116);
+  overflow: hidden;
+}
+
+.rl-workspace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--rl-border, #ddd);
+  background: var(--rl-surface-raised, #fff);
+}
+
+.rl-workspace__title {
+  margin: 0;
+  font-family: var(--rl-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--rl-text-dim);
+}
+
+.rl-workspace__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.rl-workspace__body {
+  position: relative;
+}
+
+/* --- Fullscreen / Focus mode --------------------------------------------
+ * Native fullscreen targets the workspace element itself (see
+ * InteractiveWorkspace.astro), so it is styled via the `:fullscreen`
+ * pseudo-class — no JS-toggled class needed for that path. The fallback
+ * (`.rl-workspace--focus`) reuses the same original element, never a
+ * clone, so live app state/hydration is never disturbed. Both paths share
+ * the same fill-the-viewport treatment and inner content rules. */
+.rl-workspace:fullscreen,
+.rl-workspace.rl-workspace--focus {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  border-radius: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.rl-workspace:fullscreen .rl-workspace__body,
+.rl-workspace.rl-workspace--focus .rl-workspace__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.rl-workspace:fullscreen .rl-explorer,
+.rl-workspace.rl-workspace--focus .rl-explorer {
+  height: 100%;
+}
+.rl-workspace:fullscreen .rl-explorer__canvas,
+.rl-workspace.rl-workspace--focus .rl-explorer__canvas {
+  min-height: 0;
+  height: 100%;
+}
+.rl-workspace:fullscreen .rl-explorer__side,
+.rl-workspace.rl-workspace--focus .rl-explorer__side {
+  max-height: 100%;
+}
+
+.rl-workspace:fullscreen .rl-lab,
+.rl-workspace.rl-workspace--focus .rl-lab {
+  height: 100%;
+  overflow: auto;
+}
+
+.rl-body-scroll-lock {
+  overflow: hidden;
+  /* Counter Black's `html { scrollbar-gutter: stable }` — with scrolling
+     locked there is no scrollbar to reserve space for, so the focus-mode
+     workspace can use the full viewport width. */
+  scrollbar-gutter: auto;
+}
+
+/* --- Workspace responsive ------------------------------------------------ */
+@media (max-width: 768px) {
+  .rl-workspace__header {
+    flex-wrap: wrap;
   }
+  .rl-explorer {
+    grid-template-columns: 1fr;
+  }
+  .rl-explorer__side {
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid var(--rl-border, #ddd);
+  }
+}
+
+/* --- React Flow Controls ------------------------------------------------
+ * Overrides React Flow's default white/light controls to match
+ * starlight-theme-black. Uses React Flow's own --xy-controls-* custom
+ * properties so no functionality is overridden — only visual appearance. */
+:root {
+  --xy-controls-box-shadow: 0 0 2px 1px color-mix(in srgb, var(--foreground) 10%, transparent);
+  --xy-controls-button-background-color: var(--secondary);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+}
+:root[data-theme='light'] {
+  --xy-controls-button-background-color: var(--gray-7);
+  --xy-controls-button-background-color-hover: var(--gray-5);
+  --xy-controls-button-border-color: var(--gray-5);
+}
+.react-flow__controls {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.react-flow__controls-button:focus-visible {
+  outline: 2px solid var(--rl-accent);
+  outline-offset: -2px;
+}
+
+/* --- Home page cards ---------------------------------------------------- */
+.rl-home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+@media (max-width: 47.9375rem) {
+  .rl-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--rl-border, var(--sl-color-hairline));
+  border-radius: var(--rl-radius);
+  background: var(--rl-surface-raised, var(--sl-color-bg-nav));
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+.rl-card:hover,
+.rl-card:focus-visible {
+  border-color: var(--rl-accent);
+}
+.rl-card:focus-visible {
+  outline: 2px solid var(--rl-accent);
+  outline-offset: 2px;
+}
+.rl-card__type {
+  font-family: var(--rl-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rl-accent);
+}
+.rl-card__title {
+  margin: 0;
+  font-size: var(--sl-text-lg);
+  font-weight: 600;
+  color: var(--sl-color-white);
+}
+.rl-card__body {
+  margin: 0;
+  flex-grow: 1;
+  font-size: var(--sl-text-sm);
+  line-height: 1.6;
+  color: var(--rl-text-dim, var(--sl-color-gray-3));
+}
+.rl-card__cta {
+  margin-top: 0.25rem;
+  font-size: var(--sl-text-sm);
+  font-weight: 500;
+  color: var(--sl-color-text-accent);
+}
+.rl-card:hover .rl-card__cta {
+  text-decoration: underline;
 }

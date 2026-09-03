@@ -1,10 +1,12 @@
 ---
 title: Seguridad de conexión
 description: Mantener una tecla presionada no alcanza si los frames de control dejan de llegar.
-eyebrow: Seguridad
 ---
 
 import { TtlTimeline } from '../../../../components/TtlTimeline.tsx';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+
+<Eyebrow>Seguridad</Eyebrow>
 
 Todo mensaje de manejo lleva su propia expiración (`CONTROL_TTL_MS`, 500ms en el protocolo real). Si los frames dejan de llegar — por la razón que sea — el vehículo cae a estado seguro por sí solo, sin esperar a que alguien suelte una tecla.
 

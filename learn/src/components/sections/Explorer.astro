@@ -6,6 +6,7 @@
  * serializable data down to the React island. No `fs`/`child_process`/ELK
  * call ever reaches the browser bundle.
  */
+import InteractiveWorkspace from '../shared/InteractiveWorkspace.astro';
 import { ArchitectureExplorer } from '../ArchitectureExplorer.tsx';
 import { computeAllLayouts } from '../../graph/layout.ts';
 import { resolveSourceMap } from '../../graph/source-map.ts';
@@ -27,16 +28,19 @@ const sourceMap = resolveSourceMap();
 const concepts = Object.fromEntries(CONCEPTS.map((c) => [c.id, conceptCopy(locale, c.id)]));
 const ui = uiStrings(locale);
 const story = storyId ? STORIES.find((s) => s.id === storyId) : undefined;
+const title = locale === 'es' ? 'Arquitectura del sistema' : 'System Architecture';
 ---
 
-<ArchitectureExplorer
-  client:load
-  locale={locale}
-  layouts={layouts}
-  concepts={concepts}
-  sourceMap={sourceMap}
-  ui={ui}
-  initialLevel={initialLevel}
-  focusNodeId={focusNodeId}
-  story={story}
-/>
+<InteractiveWorkspace title={title} class="rl-explorer-workspace">
+  <ArchitectureExplorer
+    client:load
+    locale={locale}
+    layouts={layouts}
+    concepts={concepts}
+    sourceMap={sourceMap}
+    ui={ui}
+    initialLevel={initialLevel}
+    focusNodeId={focusNodeId}
+    story={story}
+  />
+</InteractiveWorkspace>

@@ -340,7 +340,7 @@ export function ControlPipelineLab({ locale, ui }: ControlPipelineLabProps) {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 260px', gap: '1rem' }}>
+      <div className="rl-lab__bottom">
         <div>
           <RoverView left={wheels.left} right={wheels.right} armed={armed} />
           <TouchPad onAxes={touchAxes} onGripper={touchGripper} locale={locale} />

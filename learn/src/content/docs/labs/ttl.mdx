@@ -1,10 +1,12 @@
 ---
 title: Connection Safety
 description: Holding a key is not enough if control frames stop actually arriving.
-eyebrow: Safety
 ---
 
 import { TtlTimeline } from '../../../components/TtlTimeline.tsx';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+
+<Eyebrow>Safety</Eyebrow>
 
 Every driving message carries its own expiry (`CONTROL_TTL_MS`, 500ms in the real protocol). If frames stop arriving — for any reason — the vehicle falls back to safe state on its own, without waiting for anyone to release a key.
 

@@ -1,6 +1,7 @@
 import react from '@astrojs/react';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import starlightThemeBlack from 'starlight-theme-black';
 
 export default defineConfig({
   integrations: [
@@ -14,10 +15,27 @@ export default defineConfig({
       },
       customCss: ['./src/styles/learn.css'],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/adcuelloa/rovelink' }],
-      components: {
-        Header: './src/components/starlight/Header.astro',
-        PageTitle: './src/components/starlight/PageTitle.astro',
-      },
+      plugins: [
+        starlightThemeBlack({
+          navLinks: [
+            {
+              slug: 'start/what-is-rovelink',
+              translations: { en: 'Learn', es: 'Aprender' },
+            },
+            {
+              slug: 'start/explore-the-system',
+              translations: { en: 'Explore', es: 'Explorar' },
+            },
+            {
+              slug: 'labs/control-pipeline',
+              translations: { en: 'Labs', es: 'Laboratorios' },
+            },
+          ],
+          docs: {
+            showMarkdownActions: false,
+          },
+        }),
+      ],
       sidebar: [
         {
           label: 'Start here',

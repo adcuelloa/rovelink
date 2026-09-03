@@ -1,0 +1,171 @@
+---
+/**
+ * Reusable interactive workspace frame: title, toolbar, fullscreen/focus-mode.
+ * Wraps interactive content (Explorer, Lab, etc.) with consistent chrome and
+ * spatial control. Uses native Fullscreen API with a focus-mode overlay fallback.
+ */
+interface Props {
+  readonly title: string;
+  readonly id?: string;
+  readonly class?: string;
+}
+
+const { title, id, class: className } = Astro.props;
+const workspaceId = id ?? `rl-ws-${title.toLowerCase().replace(/\s+/g, '-')}`;
+---
+
+<div
+  class:list={['rl-workspace', className]}
+  id={workspaceId}
+  data-workspace
+  role="region"
+  aria-label={title}
+>
+  <div class="rl-workspace__header">
+    <span class="rl-workspace__title">{title}</span>
+    <div class="rl-workspace__actions">
+      <slot name="actions" />
+      <button
+        type="button"
+        class="rl-toolbar-btn"
+        data-fullscreen-toggle
+        aria-label={`Expand ${title}`}
+        title="Fullscreen"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div class="rl-workspace__body">
+    <slot />
+  </div>
+</div>
+
+<script>
+  /**
+   * Fullscreen targets the workspace element itself (never documentElement),
+   * so the Black docs shell is naturally absent while active and everything
+   * else on the page — sidebar, TOC, nav — is untouched. The fallback never
+   * clones the workspace: cloneNode() would copy DOM but not the hydrated
+   * React state/event bindings of the Explorer/Lab islands inside it,
+   * producing a visually correct but non-functional copy. Instead the
+   * fallback toggles a class on the ORIGINAL element, so the same DOM node
+   * (and its live React state) is what the user sees in both modes.
+   *
+   * Black's `.main-pane` sets `isolation: isolate`, which creates a stacking
+   * context. A `position: fixed` element trapped inside it can never paint
+   * above the header/sidebar no matter its z-index. Rather than clone, we
+   * temporarily re-parent this same element to `document.body` (a plain DOM
+   * move — React neither knows nor cares which element is its root's
+   * parent) and restore it to its exact original slot, marked by a comment
+   * anchor, on exit.
+   */
+  function initWorkspace(el: HTMLElement) {
+    const toggle = el.querySelector<HTMLElement>('[data-fullscreen-toggle]');
+    if (!toggle) return;
+
+    const workspaceEl = el;
+    const homeAnchor = document.createComment(`rl-workspace-home:${el.id}`);
+    el.before(homeAnchor);
+    let inFocusMode = false;
+    let previousActiveElement: HTMLElement | null = null;
+
+    function isActive() {
+      return document.fullscreenElement === workspaceEl || inFocusMode;
+    }
+
+    function updateIcon() {
+      const svg = toggle.querySelector('svg');
+      if (!svg) return;
+      if (isActive()) {
+        svg.innerHTML = '<path d="M4 4h4v4M12 4h-4v4M4 12h4v4M12 12h-4v-4" />';
+        toggle.setAttribute('aria-label', 'Exit fullscreen');
+        toggle.setAttribute('title', 'Exit fullscreen');
+      } else {
+        svg.innerHTML = '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />';
+        toggle.setAttribute('aria-label', `Expand ${el.getAttribute('aria-label') ?? 'workspace'}`);
+        toggle.setAttribute('title', 'Fullscreen');
+      }
+    }
+
+    async function enterFullscreen() {
+      previousActiveElement = document.activeElement as HTMLElement;
+
+      if (workspaceEl.requestFullscreen) {
+        try {
+          await workspaceEl.requestFullscreen();
+          // fullscreenchange handler finishes the state update.
+          return;
+        } catch {
+          // Fall through to focus mode.
+        }
+      }
+
+      enterFocusMode();
+    }
+
+    function enterFocusMode() {
+      inFocusMode = true;
+      workspaceEl.classList.add('rl-workspace--focus');
+      document.body.appendChild(workspaceEl);
+      document.documentElement.classList.add('rl-body-scroll-lock');
+      document.body.classList.add('rl-body-scroll-lock');
+      document.addEventListener('keydown', handleEscape);
+      updateIcon();
+      toggle.focus();
+    }
+
+    function exitFocusMode() {
+      inFocusMode = false;
+      workspaceEl.classList.remove('rl-workspace--focus');
+      homeAnchor.parentNode?.insertBefore(workspaceEl, homeAnchor.nextSibling);
+      document.documentElement.classList.remove('rl-body-scroll-lock');
+      document.body.classList.remove('rl-body-scroll-lock');
+      document.removeEventListener('keydown', handleEscape);
+      updateIcon();
+      previousActiveElement?.focus();
+    }
+
+    function onFullscreenChange() {
+      updateIcon();
+      if (document.fullscreenElement !== workspaceEl) {
+        previousActiveElement?.focus();
+      }
+    }
+
+    async function exitFullscreen() {
+      if (document.fullscreenElement === workspaceEl) {
+        try {
+          await document.exitFullscreen();
+        } catch {
+          // Ignore errors on exit.
+        }
+        return;
+      }
+
+      if (inFocusMode) {
+        exitFocusMode();
+      }
+    }
+
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape' && inFocusMode) {
+        exitFocusMode();
+      }
+    }
+
+    workspaceEl.addEventListener('fullscreenchange', onFullscreenChange);
+
+    toggle.addEventListener('click', () => {
+      if (isActive()) {
+        exitFullscreen();
+      } else {
+        enterFullscreen();
+      }
+    });
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-workspace]').forEach(initWorkspace);
+</script>
