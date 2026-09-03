@@ -1,0 +1,133 @@
+---
+title: Recovery After Reconnection
+description: What happens before a new connection is trusted to drive?
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## The complete safe recovery chain
+
+After a disconnection, the system goes through a strict sequence before the robot can drive again. Each step is required. No step can be skipped.
+
+## Step 1: Connection lost → safe stop
+
+The link drops. Either `watchNetwork()` / `watchWssLink()` detects it (sets `linkAlive = false`, triggers `enterSafeState("link-lost")`), or the TTL watchdog fires after 500ms (`enterSafeState("ttl")`). Either way, the robot stops.
+
+## Step 2: Connection re-established → WebSocket opens
+
+The browser opens a new WebSocket to the relay. The transport layer connects. No control authority exists yet — this is just a raw connection.
+
+## Step 3: Register with relay → credential verified
+
+The browser sends `controller.register` with its credential. The relay calls `#handleControllerRegister()`, which:
+
+1. Verifies credentials via `verifyCredential()`
+2. Checks for an existing registered controller (rejects if occupied)
+3. Demotes stale controllers
+
+## Step 4: Relay mints new control session → controller.session sent
+
+The relay calls `crypto.randomUUID()` to mint a fresh `controlSessionId`. It then:
+
+1. Sends `controller.session` to the device — **before** returning, guaranteeing the device sees the session before any frame
+2. Sends `controller.session` to the controller itself — so the browser knows its registration is authoritative
+
+## Step 5: Browser receives session-established → establishSessionBaseline
+
+The browser's transport layer receives the `controller.session` message. This emits a `session-established` event. The control-view handler calls `sender.establishSessionBaseline()`, which unconditionally sends `SAFE_STATE` — disarmed, zeroed, no waiting for rhythm.
+
+This frame bypasses `decideSend()` because the normal rhythm would skip it (disarmed+idle = skip). But this frame _must_ go out — the firmware is waiting for it.
+
+## Step 6: Firmware adopts new session → onSessionChanged
+
+The firmware receives the `controller.session` message and runs `onSessionChanged()`:
+
+```cpp
+void onSessionChanged(const char *sessionId) {
+  enterSafeState("session-change");
+  strlcpy(activeSession, sessionId, sizeof(activeSession));
+  lastSeq = -1;
+  sessionReady = false;
+}
+```
+
+Safe state. New session ID. Seq reset. Baseline gate closed.
+
+## Step 7: Firmware receives disarmed baseline → sessionReady=true
+
+The browser's baseline frame arrives. `applyControlFrame()` runs:
+
+- Session matches ✓
+- Seq is valid ✓
+- `sessionReady` is `false`, frame is `armed: false` → `sessionReady = true`
+- The disarmed state is applied (which is already safe state — no change to motors)
+
+The baseline is established. The firmware is now ready to accept armed frames.
+
+## Step 8: Operator explicitly arms → armed=true accepted
+
+The operator presses the arm button. The browser sends a frame with `armed: true`. `applyControlFrame()` runs:
+
+- Session matches ✓
+- Seq is valid ✓
+- `sessionReady` is `true` → normal flow
+- `armed: true` → the driving state is applied
+
+## Step 9: Control frames accepted → driving
+
+The robot is now driving. Heartbeats keep the TTL fed. The full safety chain is active.
+
+## Why reload ≠ continue driving
+
+When the operator refreshes the browser, the system does NOT resume driving automatically. The reason:
+
+1. The relay mints a **new** `controlSessionId`
+2. The firmware enters safe state on session change
+3. The browser must send a disarmed baseline
+4. The operator must explicitly arm
+
+This chain ensures that a page reload, a tab restoration, or a browser restart never causes the robot to resume driving without the operator's explicit intent.
+
+## The authority ladder
+
+Each step grants more authority. No step can be skipped:
+
+```
+CONNECTED          → WebSocket open, no authority
+REGISTERED         → Credential verified, relay accepts the socket
+CURRENT SESSION    → controlSessionId minted, device notified
+BASELINE READY     → sessionReady = true, disarmed baseline accepted
+ARMED              → operator explicitly armed
+FRESH CONTROL      → driving with active TTL watchdog
+```
+
+A connection at any lower step cannot perform the actions of a higher step. A registered controller cannot drive without a session. A session cannot arm without a baseline. A baseline cannot drive without explicit arming.
+
+---
+
+<KnowledgeCheck
+  question="After the browser reconnects, can the robot immediately continue where it left off?"
+  answer="No. The relay mints a new controlSessionId, the firmware enters safe state on session change, the browser must send a disarmed baseline, and the operator must explicitly arm. Each step is required. A page reload never causes automatic resumption of driving."
+/>
+
+---
+
+<KnowledgeCheck
+  question="What must be true before the robot can safely drive again?"
+  answer="Six conditions must hold: (1) WebSocket connected, (2) controller registered with relay, (3) relay minted new controlSessionId and sent controller.session to device, (4) browser sent disarmed baseline and firmware set sessionReady=true, (5) operator explicitly sent armed=true, (6) valid control frames arriving within TTL. No step can be skipped."
+/>
+
+---
+
+### Source evidence
+
+- `firmware/rovelink_device/rovelink_device.ino` — `onSessionChanged()`, `applyControlFrame()` session-ready gate
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+- `web/src/control-view.ts` — `session-established` handler
+- `relay/src/room.ts` — `#handleControllerRegister()`, `#sendControlSession()`

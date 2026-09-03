@@ -1,0 +1,138 @@
+---
+title: TTL & Watchdog
+description: What happens when the operator says "drive forward" and then the Internet silently disappears.
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="ttl" />
+
+## The naive system
+
+The operator sends `throttle: 1`. The robot starts driving. The network dies. In a naive system, the robot keeps driving forever — there is no mechanism to detect that the command source has disappeared.
+
+## RoveLink's answer: the TTL watchdog
+
+Every control frame carries a time-to-live. If no new frame arrives within that window, the firmware stops the robot.
+
+The constant `CONTROL_TTL_MS = 500` is defined in `protocol/src/protocol.ts` and must match the firmware's `TTL_CONTROL_MS`:
+
+```cpp
+const unsigned long TTL_CONTROL_MS = 500;
+```
+
+## Heartbeat cadence
+
+The browser sends heartbeats every 150ms (`DEFAULT_RHYTHM.heartbeatMs`):
+
+```typescript
+export const DEFAULT_RHYTHM: RhythmOptions = {
+  hzMax: 30,
+  heartbeatMs: 150,
+  threshold: 0.02,
+};
+```
+
+This means the firmware receives a fresh frame every 150ms under normal conditions. The 500ms TTL gives a 350ms margin — roughly two full heartbeat cycles — before the watchdog trips.
+
+## The test-enforced margin
+
+The codebase enforces this relationship with a test:
+
+```typescript
+assert.ok(DEFAULT_RHYTHM.heartbeatMs * 2 <= CONTROL_TTL_MS);
+```
+
+`150 * 2 = 300 <= 500`. That gives 200ms of jitter margin. On an ordinary connection with normal Internet and Wi-Fi jitter, the watchdog never fires. It only fires when the link is genuinely lost.
+
+## Firmware watchdog behavior
+
+`watchTtl()` runs in the firmware's main loop:
+
+```cpp
+void watchTtl() {
+  if (!currentState.armed) return;
+  if (millis() - lastFrameMs > TTL_CONTROL_MS)
+    enterSafeState("ttl");
+}
+```
+
+Two important details:
+
+1. **It only runs when armed.** An idle robot does not need a TTL watchdog — there is nothing to stop.
+2. **It uses the firmware's own clock.** The `sentAt` and `ttlMs` values from the frame are deliberately ignored. The firmware compares `millis() - lastFrameMs` where `lastFrameMs` is set when a valid frame is received. This means the firmware cannot be fooled by a stale `sentAt` timestamp.
+
+## Heartbeat vs watchdog
+
+These are two different things:
+
+- **Heartbeat** — "I'm still here." The browser sends a frame every 150ms to keep the firmware's watchdog fed. If the operator holds the stick still, the heartbeat ensures the robot does not stop.
+- **Watchdog** — "If you stop talking, I stop moving." If no frame arrives within 500ms, the firmware assumes the controller is gone and enters safe state.
+
+The heartbeat prevents false-positive watchdog trips. The watchdog catches real link loss.
+
+## Link loss detection
+
+Separate from TTL, the firmware also watches for network and WebSocket drops:
+
+```cpp
+void watchNetwork() {
+  const bool connected = networkConnected();
+  if (previousNetworkConnected && !connected)
+    linkAlive = false;
+  previousNetworkConnected = connected;
+}
+
+void watchWssLink() {
+  const bool connected = transportConnected();
+  if (previousWssConnected && !connected)
+    linkAlive = false;
+  previousWssConnected = connected;
+}
+```
+
+In the main loop:
+
+```cpp
+if (!linkAlive && currentState.armed)
+  enterSafeState("link-lost");
+```
+
+If the link drops while armed, the robot stops immediately — it does not wait for the TTL to expire. The TTL is a secondary defense; link loss detection is the primary one.
+
+## The tradeoff
+
+A shorter timeout (say 100ms) would fail-safe faster, but would also trip on ordinary jitter. A longer timeout (say 2000ms) would be more tolerant of bad connections, but the robot would keep driving for 2 seconds after the controller disappears. The 500ms value balances these concerns for typical home/office networks.
+
+---
+
+<KnowledgeCheck
+  question="Does the firmware use the browser's sentAt for TTL?"
+  answer="No. The firmware deliberately ignores sentAt and ttlMs from the frame. It uses its own clock via millis() - lastFrameMs > TTL_CONTROL_MS. This prevents the firmware from being fooled by a stale sentAt timestamp — the watchdog is based on when the frame actually arrived, not when the browser claims it was sent."
+/>
+
+---
+
+<KnowledgeCheck
+  question="Why is heartbeatMs set to 150ms instead of 50ms?"
+  answer="The heartbeat rate is constrained by the test-enforced margin: heartbeatMs * 2 <= CONTROL_TTL_MS. At 150ms, two heartbeat cycles (300ms) leave 200ms of jitter margin within the 500ms TTL. A faster heartbeat (50ms) would waste bandwidth on normal connections with no meaningful safety benefit — the 200ms margin is already sufficient for typical Internet/Wi-Fi jitter."
+/>
+
+---
+
+### Source evidence
+
+- `protocol/src/protocol.ts` — `CONTROL_TTL_MS`
+- `firmware/rovelink_device/rovelink_device.ino` — `watchTtl()`, `watchNetwork()`, `watchWssLink()`, `TTL_CONTROL_MS`
+- `web/src/transport/rhythm.ts` — `DEFAULT_RHYTHM.heartbeatMs`
+- `web/src/transport/rhythm.test.ts` — heartbeatMs times 2 less-than-or-equal CONTROL_TTL_MS assertion
+
+---
+
+### Up next
+
+**Emergency Stop** — When the operator needs the robot to stop NOW, regardless of normal control state.

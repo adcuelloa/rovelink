@@ -1,0 +1,96 @@
+---
+title: Safe State
+description: When the system is unsure what to do, the robot stops.
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## What is SAFE_STATE?
+
+`SAFE_STATE` is the single known state the system falls back to whenever something goes wrong or becomes ambiguous. It is defined in `protocol/src/control.ts`:
+
+```typescript
+export const SAFE_STATE: ControlState = {
+  throttle: 0,
+  steering: 0,
+  gripper: 'idle',
+  armed: false,
+};
+```
+
+Every axis is zeroed. The gripper is idle. Armed is `false`. This is not a suggestion — it is the only state the system trusts when it cannot trust anything else.
+
+## What SAFE_STATE is NOT
+
+**It is NOT "the last known state."** The system does not remember what the robot was doing before something went wrong. It discards that memory entirely. The previous state is gone.
+
+**It is NOT "zero only the throttle."** Steering, gripper, and armed are all reset too. A robot that only zeroes throttle but keeps `armed: true` could resume driving the moment a valid frame arrives. SAFE_STATE disarms.
+
+**It is NOT "wait until network comes back."** The transition to SAFE_STATE is immediate. There is no grace period, no retry window, no "wait and see." The moment the system decides it is unsafe, it stops.
+
+## Firmware behavior
+
+The firmware in `rovelink_device.ino` defines its own matching constant:
+
+```cpp
+const ControlState SAFE_STATE = {0.0f, 0.0f, 'i', false};
+```
+
+When `enterSafeState()` runs, it:
+
+1. Sets `currentState = SAFE_STATE`
+2. Calls `hwStopMotors()` — motors go to zero
+3. Calls `hwLinkLed(false)` — link LED turns off
+
+There is no transition, no animation, no gradual ramp-down. The state is set synchronously.
+
+## STOPPED vs SAFE TO ACCEPT FUTURE CONTROL
+
+When `enterSafeState()` fires, the robot is in a specific condition: **stopped and ready to accept a new, valid control frame.** It is not locked, not powered off, not in an error state that requires a reboot.
+
+The distinction matters: `SAFE_STATE` means the robot is safe _and_ waiting. If the next frame passes every gate — session, seq, baseline, armed — the robot can resume. The system does not require manual intervention to recover.
+
+## When safe state is invoked
+
+`enterSafeState()` is called with a reason string for logging. The firmware triggers it in these situations:
+
+- **Session change** — `onSessionChanged("session-change")`: a new controller has been registered; the old session is no longer authoritative
+- **Disarm** — `enterSafeState("disarmed")`: the operator sent `armed: false`
+- **TTL expiry** — `enterSafeState("ttl")`: the watchdog timer fired; no frame arrived within 500ms
+- **Link loss** — `enterSafeState("link-lost")`: `watchNetwork()` or `watchWssLink()` detected the connection dropped
+- **Emergency stop** — `enterSafeState("emergency")`: an E-stop message arrived
+
+Every path leads to the same place. The robot stops, disarms, and waits.
+
+---
+
+<KnowledgeCheck
+  question="Is setting throttle=0 the same as entering safe state?"
+  answer="No. Setting throttle=0 while keeping armed=true is a soft stop — the robot stops moving but remains armed and ready to resume with the next throttle command. SAFE_STATE zeroes all axes AND sets armed=false. The distinction is between 'stop driving' and 'stop being drivable.'"
+/>
+
+---
+
+<KnowledgeCheck
+  question="What fields does SAFE_STATE contain?"
+  answer="throttle: 0, steering: 0, gripper: 'idle', armed: false. All four driving axes are reset to their neutral/safe values, and the armed flag is explicitly false."
+/>
+
+---
+
+### Source evidence
+
+- `protocol/src/control.ts` — `SAFE_STATE` constant, `applyArmed()`, `normalizeState()`
+- `firmware/rovelink_device/rovelink_device.ino` — `enterSafeState()`, `SAFE_STATE` constant, `onSessionChanged()`
+
+---
+
+### Up next
+
+**Arming & Safe Baseline** — Why a newly connected controller cannot immediately continue driving.

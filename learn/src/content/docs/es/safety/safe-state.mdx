@@ -1,0 +1,96 @@
+---
+title: Estado seguro
+description: Cuando el sistema no sabe qué hacer, el robot se detiene.
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## ¿Qué es SAFE_STATE?
+
+`SAFE_STATE` es el único estado conocido al que el sistema recurre cuando algo sale mal o se vuelve ambiguo. Está definido en `protocol/src/control.ts`:
+
+```typescript
+export const SAFE_STATE: ControlState = {
+  throttle: 0,
+  steering: 0,
+  gripper: 'idle',
+  armed: false,
+};
+```
+
+Todos los ejes se ponen a cero. El gripper está inactivo. Armed es `false`. Esto no es una sugerencia — es el único estado en el que el sistema confía cuando no puede confiar en nada más.
+
+## Lo que SAFE_STATE NO es
+
+**NO es "el último estado conocido."** El sistema no recuerda lo que el robot estaba haciendo antes de que algo saliera mal. Descarta esa memoria por completo. El estado anterior desaparece.
+
+**NO es "poner a cero solo el throttle."** El steering, el gripper y el armed también se reinician. Un robot que solo pone a cero el throttle pero mantiene `armed: true` podría reanudar la conducción en el momento en que llegue un frame válido. SAFE_STATE desarma.
+
+**NO es "esperar a que la red regrese."** La transición a SAFE_STATE es inmediata. No hay período de gracia, no hay ventana de reintento, no hay "esperar a ver." En el momento en que el sistema decide que es inseguro, se detiene.
+
+## Comportamiento del firmware
+
+El firmware en `rovelink_device.ino` define su propia constante equivalente:
+
+```cpp
+const ControlState SAFE_STATE = {0.0f, 0.0f, 'i', false};
+```
+
+Cuando `enterSafeState()` se ejecuta:
+
+1. Establece `currentState = SAFE_STATE`
+2. Llama a `hwStopMotors()` — los motores se detienen
+3. Llama a `hwLinkLed(false)` — el LED de enlace se apaga
+
+No hay transición, no hay animación, no hay reducción gradual. El estado se establece de forma sincrónica.
+
+## STOPPED vs SAFE TO ACCEPT FUTURE CONTROL
+
+Cuando `enterSafeState()` se activa, el robot está en una condición específica: **detenido y listo para aceptar un nuevo frame de control válido.** No está bloqueado, no está apagado, no está en un estado de error que requiera un reinicio.
+
+La distinción importa: `SAFE_STATE` significa que el robot es seguro _y_ está esperando. Si el siguiente frame supera todas las compuertas — sesión, seq, línea base, armed — el robot puede reanudarse. El sistema no requiere intervención manual para recuperarse.
+
+## Cuándo se invoca el estado seguro
+
+`enterSafeState()` se llama con una cadena de razón para el registro. El firmware lo activa en estas situaciones:
+
+- **Cambio de sesión** — `onSessionChanged("session-change")`: se ha registrado un nuevo controlador; la sesión anterior ya no tiene autoridad
+- **Desarme** — `enterSafeState("disarmed")`: el operador envió `armed: false`
+- **Expiración de TTL** — `enterSafeState("ttl")`: el temporizador watchdog se activó; ningún frame llegó dentro de 500ms
+- **Pérdida de enlace** — `enterSafeState("link-lost")`: `watchNetwork()` o `watchWssLink()` detectaron que la conexión se cayó
+- **Parada de emergencia** — `enterSafeState("emergency")`: llegó un mensaje de parada de emergencia
+
+Todos los caminos llevan al mismo lugar. El robot se detiene, desarma y espera.
+
+---
+
+<KnowledgeCheck
+  question="¿Poner throttle=0 es lo mismo que entrar al estado seguro?"
+  answer="No. Poner throttle=0 mientras se mantiene armed=true es una parada suave — el robot deja de moverse pero permanece armado y listo para reanudar con el siguiente comando de throttle. SAFE_STATE pone a cero todos los ejes Y establece armed=false. La distinción está entre 'dejar de conducir' y 'dejar de poder conducir.'"
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Qué campos contiene SAFE_STATE?"
+  answer="throttle: 0, steering: 0, gripper: 'idle', armed: false. Los cuatro ejes de conducción se restablecen a sus valores neutros/seguros, y la bandera armed es explícitamente false."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `protocol/src/control.ts` — constante `SAFE_STATE`, `applyArmed()`, `normalizeState()`
+- `firmware/rovelink_device/rovelink_device.ino` — `enterSafeState()`, constante `SAFE_STATE`, `onSessionChanged()`
+
+---
+
+### A continuación
+
+**Armado y línea base segura** — Por qué un controlador recién conectado no puede continuar conduciendo inmediatamente.

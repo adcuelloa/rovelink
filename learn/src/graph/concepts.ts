@@ -36,7 +36,13 @@ export const CONCEPTS: readonly ConceptNode[] = [
     id: 'cloud-relay',
     layer: 'relay',
     introducedAt: 'plain',
-    aggregates: ['control-protocol', 'control-relay', 'robot-room', 'control-session'],
+    aggregates: [
+      'control-protocol',
+      'control-relay',
+      'robot-room',
+      'control-session',
+      'emergency-stop',
+    ],
   },
   {
     id: 'robot',
@@ -45,6 +51,11 @@ export const CONCEPTS: readonly ConceptNode[] = [
     aggregates: [
       'firmware-transport',
       'firmware-control',
+      'safe-state',
+      'safe-baseline',
+      'message-ordering',
+      'ttl-watchdog',
+      'emergency-stop',
       'differential-mix',
       'robot-hardware',
       'motors',
@@ -288,6 +299,80 @@ export const CONCEPTS: readonly ConceptNode[] = [
     sourceRefs: [
       { path: 'protocol/src/protocol.ts', symbol: 'ControlAck', kind: 'source' },
       { path: 'web/src/transport/pending-acks.ts', symbol: 'PendingAckTracker', kind: 'source' },
+    ],
+  },
+  // --- Safety & Authority concepts ---
+  {
+    id: 'safe-state',
+    layer: 'firmware',
+    introducedAt: 'technical',
+    facts: ['implemented'],
+    learnSlug: 'safety/safe-state',
+    sourceRefs: [
+      { path: 'protocol/src/control.ts', symbol: 'SAFE_STATE', kind: 'source' },
+      {
+        path: 'firmware/rovelink_device/rovelink_device.ino',
+        symbol: 'enterSafeState',
+        kind: 'source',
+      },
+    ],
+  },
+  {
+    id: 'safe-baseline',
+    layer: 'firmware',
+    introducedAt: 'technical',
+    facts: ['implemented', 'rationale'],
+    learnSlug: 'safety/safe-baseline',
+    sourceRefs: [
+      {
+        path: 'firmware/rovelink_device/rovelink_device.ino',
+        symbol: 'applyControlFrame',
+        kind: 'source',
+      },
+      { path: 'web/src/transport/sender.ts', symbol: 'establishSessionBaseline', kind: 'source' },
+    ],
+  },
+  {
+    id: 'message-ordering',
+    layer: 'firmware',
+    introducedAt: 'technical',
+    facts: ['implemented'],
+    learnSlug: 'safety/message-ordering',
+    sourceRefs: [
+      { path: 'protocol/src/protocol.ts', symbol: 'isNewerFrame', kind: 'source' },
+      {
+        path: 'firmware/rovelink_device/rovelink_device.ino',
+        symbol: 'applyControlFrame',
+        kind: 'source',
+      },
+    ],
+  },
+  {
+    id: 'ttl-watchdog',
+    layer: 'firmware',
+    introducedAt: 'technical',
+    facts: ['implemented', 'rationale'],
+    learnSlug: 'safety/ttl-watchdog',
+    sourceRefs: [
+      { path: 'protocol/src/protocol.ts', symbol: 'CONTROL_TTL_MS', kind: 'source' },
+      { path: 'firmware/rovelink_device/rovelink_device.ino', symbol: 'watchTtl', kind: 'source' },
+      { path: 'web/src/transport/rhythm.ts', symbol: 'DEFAULT_RHYTHM', kind: 'source' },
+    ],
+  },
+  {
+    id: 'emergency-stop',
+    layer: 'firmware',
+    introducedAt: 'technical',
+    facts: ['implemented', 'rationale'],
+    learnSlug: 'safety/emergency-stop',
+    sourceRefs: [
+      { path: 'protocol/src/protocol.ts', symbol: 'EmergencyStop', kind: 'source' },
+      {
+        path: 'firmware/rovelink_device/rovelink_device.ino',
+        symbol: 'onEmergencyStopReceived',
+        kind: 'source',
+      },
+      { path: 'relay/src/room.ts', kind: 'source' },
     ],
   },
 ];

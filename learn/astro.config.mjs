@@ -162,18 +162,48 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Safety',
-          translations: { es: 'Seguridad' },
+          label: 'Safety & Authority',
+          translations: { es: 'Seguridad y Autoridad' },
           items: [
             {
-              label: 'Connection Safety',
-              translations: { es: 'Seguridad de conexión' },
-              slug: 'labs/ttl',
+              label: 'Safe State',
+              translations: { es: 'Estado seguro' },
+              slug: 'safety/safe-state',
             },
             {
-              label: 'Sessions & Message Ordering',
-              translations: { es: 'Sesiones y orden de mensajes' },
-              slug: 'labs/session-sequence',
+              label: 'Arming & Safe Baseline',
+              translations: { es: 'Armado y línea base segura' },
+              slug: 'safety/safe-baseline',
+            },
+            {
+              label: 'Control Sessions',
+              translations: { es: 'Sesiones de control' },
+              slug: 'safety/control-sessions',
+            },
+            {
+              label: 'Message Ordering',
+              translations: { es: 'Orden de mensajes' },
+              slug: 'safety/message-ordering',
+            },
+            {
+              label: 'TTL & Watchdog',
+              translations: { es: 'TTL y watchdog' },
+              slug: 'safety/ttl-watchdog',
+            },
+            {
+              label: 'Emergency Stop',
+              translations: { es: 'Parada de emergencia' },
+              slug: 'safety/emergency-stop',
+            },
+            {
+              label: 'Failure Scenarios',
+              translations: { es: 'Escenarios de fallo' },
+              slug: 'safety/failure-scenarios',
+            },
+            {
+              label: 'Recovery After Reconnection',
+              translations: { es: 'Recuperación tras reconexión' },
+              slug: 'safety/reconnection-recovery',
             },
           ],
         },

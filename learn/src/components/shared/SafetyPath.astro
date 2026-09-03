@@ -1,0 +1,160 @@
+---
+/**
+ * Compact safety gate position indicator. Shows the safety decision chain
+ * a ControlFrame passes through on the firmware, with E-STOP as a
+ * separate parallel path (independent of normal sequencing/gating).
+ */
+interface Props {
+  readonly current: string;
+  readonly labels?: Record<string, string>;
+}
+
+const stages = [
+  { id: 'session', label: 'SESSION', slug: 'safety/control-sessions' },
+  { id: 'seq', label: 'SEQ', slug: 'safety/message-ordering' },
+  { id: 'baseline', label: 'BASELINE', slug: 'safety/safe-baseline' },
+  { id: 'armed', label: 'ARMED', slug: 'safety/safe-state' },
+  { id: 'ttl', label: 'TTL', slug: 'safety/ttl-watchdog' },
+  { id: 'apply', label: 'APPLY', slug: 'safety/safe-state' },
+];
+
+const parallel = [
+  { id: 'estop', label: 'E-STOP', slug: 'safety/emergency-stop' },
+];
+
+const { current, labels } = Astro.props;
+const resolvedLabels = labels ?? {};
+---
+
+<nav class="rl-safety-path" aria-label="Safety gate position">
+  <ol class="rl-safety-path__list">
+    {stages.map((stage, i) => {
+      const isActive = stage.id === current;
+      const displayName = resolvedLabels[stage.id] ?? stage.label;
+      return (
+        <li class:list={['rl-safety-path__step', { 'rl-safety-path__step--active': isActive }]}>
+          {i > 0 && <span class="rl-safety-path__arrow" aria-hidden="true">&rarr;</span>}
+          {isActive ? (
+            <span class="rl-safety-path__current" aria-current="step">{displayName}</span>
+          ) : (
+            <a class="rl-safety-path__link" href={`/${stage.slug}/`}>{displayName}</a>
+          )}
+        </li>
+      );
+    })}
+  </ol>
+  <div class="rl-safety-path__parallel">
+    <span class="rl-safety-path__parallel-label">parallel:</span>
+    {parallel.map((gate) => {
+      const isActive = gate.id === current;
+      const displayName = resolvedLabels[gate.id] ?? gate.label;
+      return isActive ? (
+        <span class="rl-safety-path__gate rl-safety-path__gate--active">{displayName}</span>
+      ) : (
+        <a class="rl-safety-path__gate" href={`/${gate.slug}/`}>{displayName}</a>
+      );
+    })}
+  </div>
+</nav>
+
+<style>
+  .rl-safety-path {
+    font-family: var(--rl-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--rl-border, #ccc);
+    border-radius: var(--rl-radius-sm, 4px);
+    background: var(--rl-surface-raised, #fff);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 1.5rem;
+  }
+  .rl-safety-path__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rl-safety-path__step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    white-space: nowrap;
+  }
+  .rl-safety-path__arrow {
+    opacity: 0.35;
+    font-size: 0.8em;
+  }
+  .rl-safety-path__link {
+    color: var(--rl-text-dim, #666);
+    text-decoration: none;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .rl-safety-path__link:hover {
+    color: var(--rl-accent, #ff8a1e);
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.12));
+  }
+  .rl-safety-path__current {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    background: var(--rl-accent, #ff8a1e);
+    color: #1a1300;
+    font-weight: 600;
+  }
+
+  .rl-safety-path__parallel {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px dashed var(--rl-border, #ddd);
+  }
+  .rl-safety-path__parallel-label {
+    font-family: var(--rl-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    color: var(--rl-text-dim, #999);
+    text-transform: uppercase;
+  }
+  .rl-safety-path__gate {
+    font-family: var(--rl-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.03em;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    color: var(--rl-text-dim, #888);
+    text-decoration: none;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .rl-safety-path__gate:hover {
+    color: var(--rl-accent, #ff8a1e);
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.12));
+  }
+  .rl-safety-path__gate--active {
+    background: var(--rl-accent-soft, rgba(255, 138, 30, 0.15));
+    color: var(--rl-accent, #ff8a1e);
+    font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .rl-safety-path {
+      font-size: 0.62rem;
+      padding: 0.5rem 0.6rem;
+    }
+    .rl-safety-path__link,
+    .rl-safety-path__current {
+      padding: 0.12rem 0.25rem;
+    }
+    .rl-safety-path__parallel {
+      flex-wrap: wrap;
+    }
+  }
+</style>

@@ -9,6 +9,7 @@ const DOCS = join(import.meta.dirname, '..', 'content', 'docs');
 const CONTROL_EN = join(DOCS, 'control');
 const CONTROL_ES = join(DOCS, 'es', 'control');
 const NETWORK_EN = join(DOCS, 'network');
+const SAFETY_EN = join(DOCS, 'safety');
 
 const CONTROL_SLUGS = [
   'browser-input',
@@ -104,7 +105,10 @@ test('every learnSlug in CONCEPTS points to an existing EN lesson', async () => 
   for (const concept of CONCEPTS) {
     if (!concept.learnSlug) continue;
     const [category, slug] = concept.learnSlug.split('/');
-    const dir = category === 'network' ? NETWORK_EN : CONTROL_EN;
+    let dir: string;
+    if (category === 'network') dir = NETWORK_EN;
+    else if (category === 'safety') dir = SAFETY_EN;
+    else dir = CONTROL_EN;
     const path = join(dir, `${slug}.mdx`);
     try {
       await readFile(path);

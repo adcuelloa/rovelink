@@ -1,0 +1,103 @@
+---
+title: Failure Scenarios
+description: Which safety mechanism should react?
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+import { SafetyFailureLab } from '../../../components/SafetyFailureLab.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## Putting it all together
+
+Each safety mechanism exists to handle a specific class of failure. Here are concrete scenarios and which mechanism catches each one.
+
+## Scenario 1: Browser crashes while armed
+
+The operator is driving. The browser tab crashes. The heartbeat stops. No more frames arrive.
+
+**Mechanism:** TTL watchdog. After 500ms, `watchTtl()` fires and calls `enterSafeState("ttl")`.
+
+## Scenario 2: Old frame from current session
+
+A frame with seq 42 was sent but delayed in a network buffer. The firmware has already processed seq 43. Frame 42 arrives.
+
+**Mechanism:** seq rejection. `isNewerFrame()` returns `false` because `42 <= 43`. The stale frame is silently dropped.
+
+## Scenario 3: Frame from old session
+
+Controller A had session `abc-123`. Controller B now has session `def-456`. A delayed frame from Controller A arrives with `controlSessionId: "abc-123"`.
+
+**Mechanism:** Session check. `strcmp(sessionId, activeSession) != 0` — the frame is rejected. It cannot roll the active session backward.
+
+## Scenario 4: New session begins with armed throttle
+
+The operator refreshes the browser. The browser's cached state has `armed: true`. The first frame sent is `armed: true`.
+
+**Mechanism:** Baseline gate. `sessionReady` is `false` after the session change. The `armed: true` frame is rejected. The firmware waits for a disarmed frame to establish the baseline.
+
+## Scenario 5: Network disappears
+
+The operator's Wi-Fi drops. The WebSocket connection dies silently — no close frame is received.
+
+**Mechanism:** Two mechanisms work in sequence:
+
+1. **Link loss detection** — `watchNetwork()` detects WiFi drop, sets `linkAlive = false`. If armed, `enterSafeState("link-lost")` fires immediately.
+2. **TTL watchdog** — if link loss detection misses it, `watchTtl()` fires after 500ms.
+
+## Scenario 6: Controller replaced
+
+Controller A is driving. Controller B connects and registers. The relay mints a new session.
+
+**Mechanism:** Session change. The relay sends `controller.session` to the firmware. `onSessionChanged()` fires: `enterSafeState("session-change")`, `lastSeq = -1`, `sessionReady = false`. Controller A's old frames are now rejected by the session check.
+
+## Scenario 7: Emergency stop
+
+The operator presses E-stop. Or: the controller disconnects, and the relay sends an E-stop.
+
+**Mechanism:** E-stop path. `onEmergencyStopReceived()` bypasses all gates and calls `enterSafeState("emergency")`. This works regardless of session, seq, armed state, or link status.
+
+## Scenario 8: Device reconnects
+
+The ESP32 loses power and reboots. It reconnects to the relay. Its `activeSession` is empty (`""`). No real session ID matches `""`.
+
+**Mechanism:** Session identity. The empty session acts as a guard — no frame from any real controller will match `""`, so the device cannot be driven until a new `controller.session` arrives. The device is safe by default.
+
+## Try it yourself
+
+Exercise every failure scenario in the interactive lab below. Each button triggers a specific safety gate check — watch which mechanism accepts, rejects, or forces a safe stop.
+
+<SafetyFailureLab locale="en" client:only="react" />
+
+---
+
+<KnowledgeCheck
+  question="A frame arrives with session B but the device has session A. What happens?"
+  answer="The session check in applyControlFrame() compares the frame's controlSessionId against activeSession. They don't match, so the frame is silently dropped. It cannot change the active session — only onSessionChanged() can do that."
+/>
+
+---
+
+<KnowledgeCheck
+  question="The operator refreshes the browser while armed. What forces the robot to stop?"
+  answer="The relay mints a new controlSessionId and sends controller.session to the firmware. onSessionChanged() enters safe state, resets lastSeq to -1, and sets sessionReady = false. Even if the browser's cached state has armed: true, the baseline gate rejects it — the new session requires an explicit disarmed frame before anything can arm."
+/>
+
+---
+
+### Source evidence
+
+- `firmware/rovelink_device/rovelink_device.ino` — `enterSafeState()`, `applyControlFrame()`, `onSessionChanged()`, `watchTtl()`, `watchNetwork()`, `watchWssLink()`, `onEmergencyStopReceived()`
+- `protocol/src/protocol.ts` — `isNewerFrame()`, `CONTROL_TTL_MS`
+- `relay/src/room.ts` — `#handleControllerRegister()`, E-stop forwarding, controller disconnect E-stop
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+
+---
+
+### Up next
+
+**Recovery After Reconnection** — What happens before a new connection is trusted to drive?

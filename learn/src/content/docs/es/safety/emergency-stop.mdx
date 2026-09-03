@@ -1,0 +1,134 @@
+---
+title: Parada de emergencia
+description: Cuando el operador necesita que el robot se detenga AHORA, sin importar el estado normal de control.
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="estop" />
+
+## ¿Qué pasa si el operador necesita que el robot se detenga AHORA?
+
+El control normal tiene compuertas: verificación de sesión, verificación de seq, verificación de línea base, verificación de armed, TTL. Cada compuerta existe por una razón. Pero ¿qué pasa si el operador necesita detenerse _sin importar_ todas ellas? ¿Qué pasa si la sesión es incorrecta, el seq está obsoleto, el TTL no ha expirado aún, pero el robot se dirige hacia una pared?
+
+La parada de emergencia existe para esto.
+
+## La parada de emergencia es un tipo de mensaje distinto
+
+La parada de emergencia no es un `ControlFrame`. Es un tipo de mensaje separado: `'emergency-stop'`. Desde `protocol/src/protocol.ts`:
+
+```typescript
+export interface EmergencyStop extends Envelope {
+  readonly type: 'emergency-stop';
+  readonly sentAt: number;
+  readonly reason?: string;
+}
+```
+
+Deliberadamente no lleva `controlSessionId`, ni `seq`, ni la bandera `armed`. No es un frame de control. Es un comando de seguridad.
+
+## Lo que la parada de emergencia evita
+
+La parada de emergencia deliberadamente evita:
+
+- Verificación de sesión — funciona incluso si la sesión es incorrecta
+- Verificación de seq — no está ordenada contra frames de control normales
+- Verificación de línea base — funciona antes de que se establezca cualquier línea base
+- Verificación de armed — funciona tanto si está armado como si no
+- linkAlive — funciona incluso si el enlace fue marcado como muerto
+- TTL — no está sujeta al temporizador watchdog
+
+El manejador del firmware va directo al estado seguro:
+
+```cpp
+void onEmergencyStopReceived(int64_t sentAt) {
+  enterSafeState("emergency");
+  transportSendEmergencyStopAck(sentAt);
+}
+```
+
+Sin condiciones, sin compuertas. Entra al estado seguro, envía la confirmación.
+
+## La parada de emergencia NO tiene sello de sesión
+
+El relay reenvía la parada de emergencia sin agregar `controlSessionId`:
+
+```typescript
+if (message.type === 'emergency-stop') {
+  // Deliberadamente SIN sello de sesión: emergency-stop debe funcionar
+  // sin importar seq/sesión del lado del dispositivo
+  this.#forward('device', message);
+  return;
+}
+```
+
+Esto es intencional. La parada de emergencia debe funcionar incluso si el controlador no ha establecido una sesión, o si la sesión es incorrecta. Agregar un sello de sesión haría que la parada de emergencia estuviera sujeta a la compuerta de sesión, anulando su propósito.
+
+## La desconexión del controlador envía parada de emergencia
+
+Cuando un controlador registrado se desconecta, el relay envía una parada de emergencia al dispositivo:
+
+```typescript
+if (attachment.role === 'controller' && attachment.registered) {
+  this.#forward('device', {
+    v: PROTOCOL_VERSION,
+    type: 'emergency-stop',
+    sentAt: Date.now(),
+    reason: 'controller-disconnected',
+  });
+}
+```
+
+Esto está comprobado en `registered` — una sonda no autenticada que abre una conexión de controlador y se desconecta inmediatamente no puede forzar una parada de emergencia espuria.
+
+## Parada de emergencia vs throttle=0
+
+La parada de emergencia no es simplemente "enviar throttle=0." La distinción:
+
+- **throttle=0** — Un estado de control ordinario. Pasa por todas las compuertas: sesión, seq, línea base, armed. Si la sesión es incorrecta, se rechaza. Si el seq está obsoleto, se rechaza. Es un comando de conducción normal que casualmente dice "detenerse."
+- **emergency-stop** — Una intención de seguridad distinta. Evita cada compuerta. Siempre funciona. No es un comando de conducción — es un comando de seguridad.
+
+## La parada de emergencia siempre recibe una confirmación
+
+El `EmergencyStopAck` repite el `sentAt` del mensaje que lo desencadenó — no el `seq`, porque la parada de emergencia es independiente de sesión/seq:
+
+```typescript
+export interface EmergencyStopAck extends Envelope {
+  readonly type: 'emergency-stop.ack';
+  readonly sentAt: number;
+}
+```
+
+El navegador usa esto para emparejar la confirmación con su medición de RTT pendiente de la parada de emergencia.
+
+---
+
+<KnowledgeCheck
+  question="¿Por qué la parada de emergencia no es equivalente a throttle=0?"
+  answer="throttle=0 es un frame de control normal que pasa por todas las compuertas: sesión, seq, línea base, armed. Si cualquier compuerta falla, el comando de parada se rechaza. La parada de emergencia evita cada compuerta — siempre funciona. throttle=0 dice 'quiero dejar de conducir.' La parada de emergencia dice 'detente ahora, sin importar el contexto.'"
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿La parada de emergencia verifica la sesión de control?"
+  answer="No. La parada de emergencia deliberadamente no verifica la sesión de control. El relay la reenvía sin estampar controlSessionId, y onEmergencyStopReceived del firmware va directo a enterSafeState sin ninguna comparación de sesión. La parada de emergencia debe funcionar incluso si no se ha establecido ninguna sesión."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `protocol/src/protocol.ts` — interfaz `EmergencyStop`, interfaz `EmergencyStopAck`
+- `firmware/rovelink_device/rovelink_device.ino` — `onEmergencyStopReceived()`
+- `relay/src/room.ts` — reenvío de parada de emergencia (deliberadamente sin sello de sesión), parada de emergencia por desconexión del controlador
+
+---
+
+### A continuación
+
+**Escenarios de fallo** — ¿Qué mecanismo de seguridad debería reaccionar?

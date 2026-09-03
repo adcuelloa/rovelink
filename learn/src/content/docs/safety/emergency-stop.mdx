@@ -1,0 +1,134 @@
+---
+title: Emergency Stop
+description: When the operator needs the robot to stop NOW, regardless of normal control state.
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="estop" />
+
+## What if the operator needs the robot to stop NOW?
+
+Normal control has gates: session check, seq check, baseline check, armed check, TTL. Each gate exists for a reason. But what if the operator needs to stop _regardless_ of all of them? What if the session is wrong, the seq is stale, the TTL hasn't expired yet, but the robot is heading toward a wall?
+
+Emergency stop exists for this.
+
+## E-stop is a distinct message type
+
+E-stop is not a `ControlFrame`. It is a separate message type: `'emergency-stop'`. From `protocol/src/protocol.ts`:
+
+```typescript
+export interface EmergencyStop extends Envelope {
+  readonly type: 'emergency-stop';
+  readonly sentAt: number;
+  readonly reason?: string;
+}
+```
+
+It deliberately carries no `controlSessionId`, no `seq`, no `armed` flag. It is not a control frame. It is a safety command.
+
+## What E-stop bypasses
+
+E-stop deliberately bypasses:
+
+- Session check — it works even if the session is wrong
+- Seq check — it is not ordered against normal control frames
+- Baseline check — it works before any baseline is established
+- Armed check — it works whether armed or not
+- linkAlive — it works even if the link was flagged as dead
+- TTL — it is not subject to the watchdog timer
+
+The firmware handler goes straight to safe state:
+
+```cpp
+void onEmergencyStopReceived(int64_t sentAt) {
+  enterSafeState("emergency");
+  transportSendEmergencyStopAck(sentAt);
+}
+```
+
+No conditions, no gates. Enter safe state, send the ack.
+
+## E-stop is NOT session-stamped
+
+The relay forwards E-stop without adding `controlSessionId`:
+
+```typescript
+if (message.type === 'emergency-stop') {
+  // Deliberately NOT session-stamped: emergency-stop must work
+  // regardless of seq/session on the device side
+  this.#forward('device', message);
+  return;
+}
+```
+
+This is intentional. E-stop must work even if the controller has not established a session, or if the session is wrong. Adding a session stamp would make E-stop subject to the session gate, defeating its purpose.
+
+## Controller disconnect sends E-stop
+
+When a registered controller disconnects, the relay sends an E-stop to the device:
+
+```typescript
+if (attachment.role === 'controller' && attachment.registered) {
+  this.#forward('device', {
+    v: PROTOCOL_VERSION,
+    type: 'emergency-stop',
+    sentAt: Date.now(),
+    reason: 'controller-disconnected',
+  });
+}
+```
+
+This is gated on `registered` — an unauthenticated probe that opens a controller connection and immediately disconnects cannot force a spurious emergency stop.
+
+## E-stop vs throttle=0
+
+E-stop is not just "send throttle=0." The distinction:
+
+- **throttle=0** — An ordinary control state. It goes through all gates: session, seq, baseline, armed. If the session is wrong, it is rejected. If the seq is stale, it is rejected. It is a normal driving command that happens to say "stop."
+- **emergency-stop** — A distinct safety intent. It bypasses every gate. It always works. It is not a driving command — it is a safety command.
+
+## E-stop always gets an ACK
+
+The `EmergencyStopAck` echoes the triggering message's `sentAt` — not `seq`, because E-stop is session/seq-independent:
+
+```typescript
+export interface EmergencyStopAck extends Envelope {
+  readonly type: 'emergency-stop.ack';
+  readonly sentAt: number;
+}
+```
+
+The browser uses this to match the ACK against its pending E-stop RTT measurement.
+
+---
+
+<KnowledgeCheck
+  question="Why is E-stop not equivalent to throttle=0?"
+  answer="throttle=0 is a normal control frame that goes through all gates: session, seq, baseline, armed. If any gate fails, the stop command is rejected. E-stop bypasses every gate — it always works. throttle=0 says 'I want to stop driving.' E-stop says 'stop now, regardless of context.'"
+/>
+
+---
+
+<KnowledgeCheck
+  question="Does E-stop check the control session?"
+  answer="No. E-stop deliberately does not check the control session. The relay forwards it without stamping controlSessionId, and the firmware's onEmergencyStopReceived goes straight to enterSafeState without any session comparison. E-stop must work even if no session has been established."
+/>
+
+---
+
+### Source evidence
+
+- `protocol/src/protocol.ts` — `EmergencyStop` interface, `EmergencyStopAck` interface
+- `firmware/rovelink_device/rovelink_device.ino` — `onEmergencyStopReceived()`
+- `relay/src/room.ts` — E-stop forwarding (deliberately not session-stamped), controller disconnect E-stop
+
+---
+
+### Up next
+
+**Failure Scenarios** — Which safety mechanism should react?

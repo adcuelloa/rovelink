@@ -35,4 +35,11 @@ export const EDGES: readonly ConceptEdge[] = [
   flow('robot-hardware', 'motors'),
   { id: 'firmware-control->control-ack', from: 'firmware-control', to: 'control-ack', kind: 'ack' },
   { id: 'control-ack->control-sender', from: 'control-ack', to: 'control-sender', kind: 'ack' },
+
+  // Safety & Authority flow
+  flow('control-session', 'safe-state'),
+  flow('safe-state', 'safe-baseline'),
+  flow('safe-baseline', 'message-ordering'),
+  flow('message-ordering', 'ttl-watchdog'),
+  { id: 'emergency-stop->safe-state', from: 'emergency-stop', to: 'safe-state', kind: 'flow' },
 ];

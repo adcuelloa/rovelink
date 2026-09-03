@@ -1,0 +1,117 @@
+---
+title: Sesiones de control
+description: Por qué el seq solo no es suficiente.
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="session" />
+
+## Por qué los números de secuencia solos fallan
+
+Los números de secuencia resuelven el orden dentro de la vida útil de un controlador. Si la misma pestaña del navegador envía los frames 41, 42, 43 — el firmware sabe que debe rechazar 41 y 42 una vez que llega el 43.
+
+Pero ¿qué sucede cuando el controlador desaparece y uno nuevo toma su lugar?
+
+```
+Controlador A: envía seq 94, luego se desconecta
+Controlador B: comienza desde cero con seq 1
+```
+
+Sin identidad de sesión, el firmware ve `1 < 94` y rechaza cada frame del Controlador B. El robot queda permanentemente atascado — nadie puede conducirlo.
+
+## La solución de identidad de sesión
+
+El relay asigna un `controlSessionId` a cada controlador en el momento en que se vuelve autoritativo. Este es un valor de `crypto.randomUUID()`, acuñado del lado del servidor en `#handleControllerRegister`:
+
+```typescript
+const controlSessionId = crypto.randomUUID();
+```
+
+El navegador nunca establece este campo. No tiene autoridad para declarar su propia sesión. El relay lo estampa en cada frame que reenvía al dispositivo.
+
+## El rol del relay
+
+Cuando un controlador se registra, el relay:
+
+1. Verifica las credenciales
+2. Verifica si hay un controlador registrado existente (rechaza si está ocupado)
+3. Acuña `controlSessionId` mediante `crypto.randomUUID()`
+4. Envía `controller.session` al dispositivo **antes** de retornar — garantizando que el dispositivo vea la sesión antes que cualquier frame
+5. Envía `controller.session` al propio controlador — para que el navegador sepa que su registro es autoritativo
+
+Cuando un frame de control llega del controlador, el relay sobrescribe cualquier `controlSessionId` suministrado por el cliente:
+
+```typescript
+this.#forward('device', { ...message, controlSessionId: attachment.controlSessionId });
+```
+
+El valor del navegador se ignora. El valor del relay es autoritativo.
+
+## Manejo de sesión del firmware
+
+Cuando el firmware recibe un mensaje `controller.session`, se ejecuta `onSessionChanged()`:
+
+```cpp
+void onSessionChanged(const char *sessionId) {
+  enterSafeState("session-change");
+  strlcpy(activeSession, sessionId, sizeof(activeSession));
+  lastSeq = -1;
+  sessionReady = false;
+}
+```
+
+Ocurren tres cosas:
+
+1. **Estado seguro** — el robot se detiene inmediatamente
+2. **ID de sesión actualizado** — se adopta la nueva sesión
+3. **lastSeq restablecido a -1** — el contador de secuencia se reinicia para la nueva sesión
+4. **sessionReady = false** — la compuerta de línea base se restablece; la nueva sesión debe establecer su línea base desarmada
+
+Un `ControlFrame` nunca puede cambiar la sesión activa. La sesión solo cambia mediante `onSessionChanged()`, impulsado exclusivamente por el mensaje `controller.session` autorizado por el relay.
+
+## Ciclo de vida de la sesión
+
+```
+1. El controlador se registra con el relay
+2. El relay acuña controlSessionId (crypto.randomUUID)
+3. El relay envía controller.session al dispositivo
+4. El relay envía controller.session al controlador
+5. La sesión del controlador está ahora establecida
+6. El relay estampa controlSessionId en cada frame reenviado
+7. El firmware verifica que controlSessionId coincida con activeSession
+```
+
+Si el controlador se desconecta, el relay envía un `emergency-stop` al dispositivo (comprobado en `registered`), y la sesión termina. El siguiente controlador obtiene una sesión nueva.
+
+---
+
+<KnowledgeCheck
+  question="¿Quién crea controlSessionId?"
+  answer="El relay, del lado del servidor, usando crypto.randomUUID(). El navegador nunca lo establece. El relay lo estampa en cada frame que reenvía al dispositivo, y el dispositivo solo se entera de un cambio de sesión a través del mensaje explícito controller.session, nunca inspeccionando un ControlFrame."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Un ControlFrame puede cambiar la sesión activa?"
+  answer="No. Un ControlFrame nunca puede establecer ni cambiar la sesión activa. Solo onSessionChanged(), impulsado por el mensaje controller.session autorizado por el relay, puede cambiar activeSession. Esto evita que un frame retrasado de una sesión anterior rebote la sesión del dispositivo hacia atrás."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `relay/src/room.ts` — `#handleControllerRegister()`, `#sendControlSession()`, reenvío de frames de control
+- `protocol/src/protocol.ts` — `ControlFrame.controlSessionId`, interfaz `ControlSession`
+- `firmware/rovelink_device/rovelink_device.ino` — `onSessionChanged()`, comparación de ID de sesión en `applyControlFrame()`
+
+---
+
+### A continuación
+
+**Orden de mensajes y seq** — Las redes no le dan a su aplicación permiso para asumir que cada mensaje antiguo aún debe aplicarse.

@@ -1,0 +1,106 @@
+---
+title: Arming & Safe Baseline
+description: Why a newly connected controller cannot immediately continue driving.
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="baseline" />
+
+## The dangerous naive model
+
+A browser holds `armed: true` from a previous session. The operator refreshes the page. The browser's JavaScript state resets, but what about the old cached state? What if a tab was left open? What if the browser restored the previous form values?
+
+The dangerous assumption is: **old browser state with `armed: true` persists across a session change**, and the firmware would accept it. This would mean the robot could start driving the moment a new connection is established, with no operator action required.
+
+RoveLink does not allow this.
+
+## Why the browser cannot be trusted
+
+The browser is not the authority on the initial armed state. It is the authority on what the operator _wants_ to do — but what the operator wanted a moment ago may not match what the firmware currently considers safe. A new session means a new security context. The firmware must establish what it considers safe before any driving can occur.
+
+## The safe baseline rule
+
+The rule is straightforward:
+
+1. New session begins (relay mints `controlSessionId`, sends `controller.session`)
+2. Firmware calls `onSessionChanged()` → enters safe state, resets `lastSeq = -1`, sets `sessionReady = false`
+3. The first frame the firmware accepts **MUST be disarmed** (`armed: false`)
+4. That disarmed frame establishes the baseline — `sessionReady = true`
+5. Only _then_ can a later `armed: true` frame actually arm the vehicle
+
+The firmware never accepts `armed: true` as the first frame of a new session, even if the session ID matches perfectly and the seq is valid.
+
+## Firmware baseline gate logic
+
+The three-state gate in `applyControlFrame()`:
+
+```
+sessionReady=false + armed=true  → REJECT (return immediately)
+sessionReady=false + armed=false → establish baseline (sessionReady = true, fall through)
+sessionReady=true               → normal flow (armed/disarmed handled normally)
+```
+
+The key detail: **armed=true before baseline still consumes the seq.** The firmware calls `lastSeq = seq` and `lastFrameMs = millis()` before the session-ready check, so the stale armed frame is not silently ignored — it is consumed and rejected.
+
+```cpp
+// seq gate runs FIRST — consumes the seq
+if (seq <= lastSeq) return;
+lastSeq = seq;
+lastFrameMs = millis();
+
+// session-ready gate runs SECOND
+if (!sessionReady) {
+  if (armed) {
+    // armed=true rejected before baseline
+    return;
+  }
+  sessionReady = true;
+  // falls through — disarmed frame is safe to apply
+}
+```
+
+## How establishSessionBaseline works in the browser
+
+When the browser receives `controller.session` from the relay, it calls `ControlSender.establishSessionBaseline()`. This is a one-shot, unconditional send of `SAFE_STATE` — disarmed, zeroed, no waiting for rhythm:
+
+```typescript
+establishSessionBaseline(): void {
+  this.#lastSent = SAFE_STATE;
+  this.#lastSentMs = this.#now();
+  this.#transport.sendControl(SAFE_STATE);
+}
+```
+
+This bypasses `decideSend()` for exactly one frame. The reason: `decideSend()` skips sending when disarmed+idle (correct steady-state optimization), but the baseline frame _must_ go out immediately — the firmware is waiting for it. After this single send, the normal rhythm resumes.
+
+---
+
+<KnowledgeCheck
+  question="Why can't the first frame of a new session be armed?"
+  answer="Because the browser may retain armed=true from a previous session. The firmware cannot distinguish 'operator intentionally armed' from 'browser restored stale state.' By requiring the first frame to be disarmed, the firmware guarantees the operator explicitly arms after each session change."
+/>
+
+---
+
+<KnowledgeCheck
+  question="What happens to the seq if armed=true arrives before baseline?"
+  answer="The seq is consumed. The firmware updates lastSeq and lastFrameMs before the session-ready check, so the rejected armed=true frame still advances the sequence. This prevents replay attacks where an attacker resends old armed frames hoping to catch a window."
+/>
+
+---
+
+### Source evidence
+
+- `firmware/rovelink_device/rovelink_device.ino` — `applyControlFrame()` session-ready gate, `onSessionChanged()`
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+
+---
+
+### Up next
+
+**Control Sessions** — Why seq alone is not enough.

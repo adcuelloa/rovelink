@@ -1,0 +1,101 @@
+---
+title: Message Ordering & seq
+description: Networks do not give your application permission to assume every old message should still be applied.
+---
+
+import SafetyPath from '../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Safety &amp; Authority</Eyebrow>
+
+<SafetyPath current="seq" />
+
+## Latest valid ordering
+
+The rule is simple: **highest seq wins, stale ones are discarded.** The firmware does not care about arrival order. It cares about the sequence number.
+
+```
+seq 41: accepted (lastSeq = 41)
+seq 43: accepted (lastSeq = 43)
+seq 42: REJECTED (stale — seq 42 <= lastSeq 43)
+```
+
+Duplicate seq values are also rejected. The comparison is strict greater-than.
+
+## The exact comparison
+
+From `protocol/src/protocol.ts`:
+
+```typescript
+export const isNewerFrame = (frame: ControlFrame, lastSeq: number): boolean => frame.seq > lastSeq;
+```
+
+The firmware applies the same logic:
+
+```cpp
+if (seq <= lastSeq) return;
+lastSeq = seq;
+```
+
+Strict greater-than. A retransmission of the same seq is rejected. The highest seq always wins.
+
+## When lastSeq resets
+
+`lastSeq` resets to `-1` when the session changes. This is handled by `onSessionChanged()`:
+
+```cpp
+lastSeq = -1;
+```
+
+This means the first frame of a new session (seq 0 or 1) is always accepted, regardless of what seq the previous session reached. The reset is session-scoped, not global.
+
+## Seq consumption before baseline
+
+An important subtlety: **seq advances even if the frame is later rejected.** When a frame arrives with a valid session and a higher seq, the firmware immediately updates `lastSeq` and `lastFrameMs` — before checking the session-ready gate.
+
+This means an `armed: true` frame that arrives before the baseline is established still consumes the seq. It is rejected for being armed-before-baseline, but its seq is gone. This prevents replay attacks where an attacker resends old frames hoping to catch a window.
+
+## The safety value of seq
+
+Sequence numbers defend against:
+
+- **Stale/replayed frames** — an old frame that arrives late is rejected
+- **Session transitions** — when the session changes, seq resets, preventing old-session frames from sneaking in (even if they somehow pass the session check)
+- **Defensive validation** — even within one healthy WebSocket connection, seq provides an invariant: if you have seen seq 43, you will never apply seq 42
+
+## WebSocket does NOT randomly reorder
+
+Within one healthy WebSocket connection, messages arrive in order. WebSocket guarantees FIFO delivery on a single connection. The seq check is not defending against random reordering on a healthy link — it is defending against:
+
+- Stale frames from a previous connection that arrive after reconnection
+- Replay attacks where an attacker resends captured frames
+- Edge cases during session transitions
+- Defensive validation as a safety invariant
+
+---
+
+<KnowledgeCheck
+  question="If lastSeq is 43, should seq 42 be applied?"
+  answer="No. The comparison seq <= lastSeq rejects it. 42 is less than 43, so it is stale. The firmware only accepts frames with seq strictly greater than lastSeq."
+/>
+
+---
+
+<KnowledgeCheck
+  question="Does seq reset when the session changes?"
+  answer="Yes. onSessionChanged() sets lastSeq = -1. This means the first frame of a new session is always accepted regardless of the previous session's seq value. The reset is scoped to the session, not global."
+/>
+
+---
+
+### Source evidence
+
+- `protocol/src/protocol.ts` — `isNewerFrame()`, `ControlFrame.seq`
+- `firmware/rovelink_device/rovelink_device.ino` — `applyControlFrame()` seq gate, `onSessionChanged()` lastSeq reset
+
+---
+
+### Up next
+
+**TTL & Watchdog** — What happens when the operator says "drive forward" and then the Internet silently disappears.

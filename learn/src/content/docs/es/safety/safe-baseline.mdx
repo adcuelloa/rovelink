@@ -1,0 +1,106 @@
+---
+title: Armado y línea base segura
+description: Por qué un controlador recién conectado no puede continuar conduciendo inmediatamente.
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="baseline" />
+
+## El modelo naive peligroso
+
+Un navegador retiene `armed: true` de una sesión anterior. El operador refresca la página. El estado JavaScript del navegador se restablece, pero ¿qué pasa con el estado en caché anterior? ¿Qué pasaría si una pestaña quedó abierta? ¿Qué pasaría si el navegador restauró los valores del formulario anterior?
+
+La suposición peligrosa es: **el estado anterior del navegador con `armed: true` persiste a través de un cambio de sesión**, y el firmware lo aceptaría. Esto significaría que el robot podría comenzar a conducir en el momento en que se establezca una nueva conexión, sin que el operador realice ninguna acción.
+
+RoveLink no permite esto.
+
+## Por qué el navegador no puede ser confiable
+
+El navegador no es la autoridad sobre el estado inicial de armado. Es la autoridad sobre lo que el operador _quiere_ hacer — pero lo que el operador quería hace un momento puede no coincidir con lo que el firmware actualmente considera seguro. Una nueva sesión significa un nuevo contexto de seguridad. El firmware debe establecer lo que considera seguro antes de que pueda ocurrir alguna conducción.
+
+## La regla de la línea base segura
+
+La regla es sencilla:
+
+1. Nueva sesión comienza (el relay acuña `controlSessionId`, envía `controller.session`)
+2. El firmware llama a `onSessionChanged()` → entra al estado seguro, restablece `lastSeq = -1`, establece `sessionReady = false`
+3. El primer frame que el firmware acepta **DEBE estar desarmado** (`armed: false`)
+4. Ese frame desarmado establece la línea base — `sessionReady = true`
+5. Solo _entonces_ un frame posterior con `armed: true` puede armar realmente el vehículo
+
+El firmware nunca acepta `armed: true` como primer frame de una nueva sesión, incluso si el ID de sesión coincide perfectamente y el seq es válido.
+
+## Lógica de compuerta de línea base del firmware
+
+La compuerta de tres estados en `applyControlFrame()`:
+
+```
+sessionReady=false + armed=true  → RECHAZAR (retornar inmediatamente)
+sessionReady=false + armed=false → establecer línea base (sessionReady = true, continuar)
+sessionReady=true                → flujo normal (armed/desarmed se maneja normalmente)
+```
+
+El detalle clave: **armed=true antes de la línea base aún consume el seq.** El firmware llama a `lastSeq = seq` y `lastFrameMs = millis()` antes de la verificación de sesión lista, por lo que el frame armed anterior no se ignora silenciosamente — se consume y se rechaza.
+
+```cpp
+// la compuerta de seq se ejecuta PRIMERA — consume el seq
+if (seq <= lastSeq) return;
+lastSeq = seq;
+lastFrameMs = millis();
+
+// la compuerta de sesión lista se ejecuta SEGUNDA
+if (!sessionReady) {
+  if (armed) {
+    // armed=true rechazado antes de la línea base
+    return;
+  }
+  sessionReady = true;
+  // continúa — el frame desarmado es seguro de aplicar
+}
+```
+
+## Cómo funciona establishSessionBaseline en el navegador
+
+Cuando el navegador recibe `controller.session` del relay, llama a `ControlSender.establishSessionBaseline()`. Este es un envío único e incondicional de `SAFE_STATE` — desarmado, a cero, sin esperar al ritmo:
+
+```typescript
+establishSessionBaseline(): void {
+  this.#lastSent = SAFE_STATE;
+  this.#lastSentMs = this.#now();
+  this.#transport.sendControl(SAFE_STATE);
+}
+```
+
+Esto evita `decideSend()` durante exactamente un frame. La razón: `decideSend()` omite el envío cuando está desarmado+inactivo (optimización correcta de estado estable), pero el frame de línea base _debe_ enviarse inmediatamente — el firmware está esperándolo. Después de este envío único, el ritmo normal se reanuda.
+
+---
+
+<KnowledgeCheck
+  question="¿Por qué el primer frame de una nueva sesión no puede estar armado?"
+  answer="Porque el navegador puede retener armed=true de una sesión anterior. El firmware no puede distinguir entre 'el operador armó intencionalmente' y 'el navegador restauró un estado obsoleto.' Al exigir que el primer frame esté desarmado, el firmware garantiza que el operador arma explícitamente después de cada cambio de sesión."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Qué sucede con el seq si armed=true llega antes de la línea base?"
+  answer="El seq se consume. El firmware actualiza lastSeq y lastFrameMs antes de la verificación de sesión lista, por lo que el frame rechazado con armed=true aún avanza la secuencia. Esto previene ataques de reproducción donde un atacante reenvía frames armed antiguos esperando capturar una ventana."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `firmware/rovelink_device/rovelink_device.ino` — compuerta de sesión lista en `applyControlFrame()`, `onSessionChanged()`
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+
+---
+
+### A continuación
+
+**Sesiones de control** — Por qué el seq solo no es suficiente.

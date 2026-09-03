@@ -1,0 +1,101 @@
+---
+title: Orden de mensajes y seq
+description: Las redes no le dan a su aplicación permiso para asumir que cada mensaje antiguo aún debe aplicarse.
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="seq" />
+
+## Orden por válido más reciente
+
+La regla es simple: **el mayor seq gana, los obsoletos se descartan.** El firmware no le importa el orden de llegada. Le importa el número de secuencia.
+
+```
+seq 41: aceptado (lastSeq = 41)
+seq 43: aceptado (lastSeq = 43)
+seq 42: RECHAZADO (obsoleto — seq 42 <= lastSeq 43)
+```
+
+Los valores de seq duplicados también se rechazan. La comparación es estrictamente mayor que.
+
+## La comparación exacta
+
+Desde `protocol/src/protocol.ts`:
+
+```typescript
+export const isNewerFrame = (frame: ControlFrame, lastSeq: number): boolean => frame.seq > lastSeq;
+```
+
+El firmware aplica la misma lógica:
+
+```cpp
+if (seq <= lastSeq) return;
+lastSeq = seq;
+```
+
+Estrictamente mayor que. Una retransmisión del mismo seq se rechaza. El mayor seq siempre gana.
+
+## Cuándo se restablece lastSeq
+
+`lastSeq` se restablece a `-1` cuando cambia la sesión. Esto lo maneja `onSessionChanged()`:
+
+```cpp
+lastSeq = -1;
+```
+
+Esto significa que el primer frame de una nueva sesión (seq 0 o 1) siempre se acepta, sin importar qué seq alcanzó la sesión anterior. El restablecimiento está limitado a la sesión, no es global.
+
+## Consumo de seq antes de la línea base
+
+Una sutileza importante: **el seq avanza incluso si el frame es rechazado posteriormente.** Cuando un frame llega con una sesión válida y un seq mayor, el firmware actualiza inmediatamente `lastSeq` y `lastFrameMs` — antes de verificar la compuerta de sesión lista.
+
+Esto significa que un frame con `armed: true` que llega antes de que se establezca la línea base aún consume el seq. Se rechaza por estar armado-antes-de-la-línea-base, pero su seq ya se fue. Esto previene ataques de reproducción donde un atacante reenvía frames antiguos esperando capturar una ventana.
+
+## El valor de seguridad del seq
+
+Los números de secuencia defienden contra:
+
+- **Frames obsoletos/reproducidos** — un frame antiguo que llega tarde se rechaza
+- **Transiciones de sesión** — cuando cambia la sesión, el seq se restablece, impidiendo que frames de sesiones anteriores se cuelen (aunque de alguna manera pasen la verificación de sesión)
+- **Validación defensiva** — incluso dentro de una conexión WebSocket saludable, el seq proporciona un invariante: si has visto seq 43, nunca aplicarás seq 42
+
+## WebSocket NO reordena aleatoriamente
+
+Dentro de una conexión WebSocket saludable, los mensajes llegan en orden. WebSocket garantiza entrega FIFO en una única conexión. La verificación de seq no se defiende contra la reordenación aleatoria en un enlace saludable — se defiende contra:
+
+- Frames obsoletos de una conexión anterior que llegan después de la reconexión
+- Ataques de reproducción donde un atacante reenvía frames capturados
+- Casos límite durante transiciones de sesión
+- Validación defensiva como invariante de seguridad
+
+---
+
+<KnowledgeCheck
+  question="Si lastSeq es 43, ¿debería aplicarse seq 42?"
+  answer="No. La comparación seq <= lastSeq lo rechaza. 42 es menor que 43, por lo que está obsoleto. El firmware solo acepta frames con seq estrictamente mayor que lastSeq."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿El seq se restablece cuando cambia la sesión?"
+  answer="Sí. onSessionChanged() establece lastSeq = -1. Esto significa que el primer frame de una nueva sesión siempre se acepta sin importar el valor de seq de la sesión anterior. El restablecimiento está limitado a la sesión, no es global."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `protocol/src/protocol.ts` — `isNewerFrame()`, `ControlFrame.seq`
+- `firmware/rovelink_device/rovelink_device.ino` — compuerta de seq en `applyControlFrame()`, restablecimiento de lastSeq en `onSessionChanged()`
+
+---
+
+### A continuación
+
+**TTL y watchdog** — Qué sucede cuando el operador dice "avanzar" y luego Internet desaparece silenciosamente.

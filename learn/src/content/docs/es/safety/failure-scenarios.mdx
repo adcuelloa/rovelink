@@ -1,0 +1,103 @@
+---
+title: Escenarios de fallo
+description: ¿Qué mecanismo de seguridad debería reaccionar?
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+import { SafetyFailureLab } from '../../../../components/SafetyFailureLab.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## Poniendo todo junto
+
+Cada mecanismo de seguridad existe para manejar una clase específica de fallo. Aquí hay escenarios concretos y qué mecanismo detecta cada uno.
+
+## Escenario 1: El navegador se bloquea mientras está armado
+
+El operador está conduciendo. La pestaña del navegador se bloquea. El heartbeat se detiene. No llegan más frames.
+
+**Mecanismo:** Watchdog TTL. Después de 500ms, `watchTtl()` se activa y llama a `enterSafeState("ttl")`.
+
+## Escenario 2: Frame antiguo de la sesión actual
+
+Un frame con seq 42 fue enviado pero se retrasó en un búfer de red. El firmware ya procesó seq 43. El frame 42 llega.
+
+**Mecanismo:** Rechazo de seq. `isNewerFrame()` retorna `false` porque `42 <= 43`. El frame obsoleto se descarta silenciosamente.
+
+## Escenario 3: Frame de una sesión anterior
+
+El controlador A tenía la sesión `abc-123`. El controlador B ahora tiene la sesión `def-456`. Un frame retrasado del controlador A llega con `controlSessionId: "abc-123"`.
+
+**Mecanismo:** Verificación de sesión. `strcmp(sessionId, activeSession) != 0` — el frame se rechaza. No puede retroceder la sesión activa.
+
+## Escenario 4: Nueva sesión comienza con throttle armado
+
+El operador refresca el navegador. El estado en caché del navegador tiene `armed: true`. El primer frame enviado es `armed: true`.
+
+**Mecanismo:** Compuerta de línea base. `sessionReady` es `false` después del cambio de sesión. El frame `armed: true` se rechaza. El firmware espera un frame desarmado para establecer la línea base.
+
+## Escenario 5: La red desaparece
+
+El Wi-Fi del operador se cae. La conexión WebSocket muere silenciosamente — no se recibe frame de cierre.
+
+**Mecanismo:** Dos mecanismos funcionan en secuencia:
+
+1. **Detección de pérdida de enlace** — `watchNetwork()` detecta la caída del Wi-Fi, establece `linkAlive = false`. Si está armado, `enterSafeState("link-lost")` se activa inmediatamente.
+2. **Watchdog TTL** — si la detección de pérdida de enlace lo pierde, `watchTtl()` se activa después de 500ms.
+
+## Escenario 6: Controlador reemplazado
+
+El controlador A está conduciendo. El controlador B se conecta y se registra. El relay acuña una nueva sesión.
+
+**Mecanismo:** Cambio de sesión. El relay envía `controller.session` al firmware. `onSessionChanged()` se activa: `enterSafeState("session-change")`, `lastSeq = -1`, `sessionReady = false`. Los frames antiguos del controlador A ahora son rechazados por la verificación de sesión.
+
+## Escenario 7: Parada de emergencia
+
+El operador presiona la parada de emergencia. O: el controlador se desconecta, y el relay envía una parada de emergencia.
+
+**Mecanismo:** Ruta de parada de emergencia. `onEmergencyStopReceived()` evita todas las compuertas y llama a `enterSafeState("emergency")`. Esto funciona sin importar la sesión, el seq, el estado armado o el estado del enlace.
+
+## Escenario 8: El dispositivo se reconecta
+
+El ESP32 pierde energía y se reinicia. Se reconecta al relay. Su `activeSession` está vacío (`""`). Ningún ID de sesión real coincide con `""`.
+
+**Mecanismo:** Identidad de sesión. La sesión vacía actúa como guardia — ningún frame de ningún controlador real coincidirá con `""`, por lo que el dispositivo no puede ser conducido hasta que llegue un nuevo `controller.session`. El dispositivo es seguro por defecto.
+
+## Pruébalo tú mismo
+
+Ejercita todos los escenarios de fallo en el laboratorio interactivo a continuación. Cada botón dispara una verificación específica de la compuerta de seguridad — observa qué mecanismo acepta, rechaza o fuerza una parada segura.
+
+<SafetyFailureLab locale="es" client:only="react" />
+
+---
+
+<KnowledgeCheck
+  question="Un frame llega con sesión B pero el dispositivo tiene sesión A. ¿Qué sucede?"
+  answer="La verificación de sesión en applyControlFrame() compara el controlSessionId del frame contra activeSession. No coinciden, por lo que el frame se descarta silenciosamente. No puede cambiar la sesión activa — solo onSessionChanged() puede hacer eso."
+/>
+
+---
+
+<KnowledgeCheck
+  question="El operador refresca el navegador mientras está armado. ¿Qué obliga al robot a detenerse?"
+  answer="El relay acuña un nuevo controlSessionId y envía controller.session al firmware. onSessionChanged() entra al estado seguro, restablece lastSeq a -1 y establece sessionReady = false. Incluso si el estado en caché del navegador tiene armed: true, la compuerta de línea base lo rechaza — la nueva sesión requiere un frame desarmado explícito antes de que algo pueda armar."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `firmware/rovelink_device/rovelink_device.ino` — `enterSafeState()`, `applyControlFrame()`, `onSessionChanged()`, `watchTtl()`, `watchNetwork()`, `watchWssLink()`, `onEmergencyStopReceived()`
+- `protocol/src/protocol.ts` — `isNewerFrame()`, `CONTROL_TTL_MS`
+- `relay/src/room.ts` — `#handleControllerRegister()`, reenvío de parada de emergencia, parada de emergencia por desconexión del controlador
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+
+---
+
+### A continuación
+
+**Recuperación tras reconexión** — ¿Qué sucede antes de que una nueva conexión sea confiable para conducir?

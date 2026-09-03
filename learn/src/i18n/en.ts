@@ -187,6 +187,54 @@ export const EN_CONCEPTS: Record<string, ConceptCopy> = {
       'Sent by firmware only after a frame passes session/seq validation and its resulting state has been applied — never for a rejected frame. The browser correlates it against a locally-tracked pending-send timestamp (PendingAckTracker) to compute Control RTT, kept deliberately separate from Relay RTT (a plain ping/pong to the edge).',
     why: "Relay RTT only proves the network path to Cloudflare is fast; Control ACK is the only signal that proves the physical robot did something, which is why they're never merged into one number.",
   },
+  'safe-state': {
+    title: 'Safe state',
+    plain:
+      'The known state the robot falls back to whenever something goes wrong — all axes zeroed, disarmed.',
+    technical:
+      "SAFE_STATE: { throttle: 0, steering: 0, gripper: 'idle', armed: false }. enterSafeState() applies it synchronously, stops motors, and turns off the link LED. Invoked on session change, disarm, TTL expiry, link loss, and emergency stop.",
+    why: 'A single, explicitly defined fallback prevents partial stops or accidental re-arm — the robot is either being actively controlled or it is in safe state.',
+    safetyImpact:
+      "Every safety path converges to the same known state, so the robot's behavior after any failure is predictable.",
+  },
+  'safe-baseline': {
+    title: 'Safe baseline',
+    plain:
+      "A fresh session must send one disarmed frame before it can arm — preventing the browser's cached armed state from inheriting across a reconnect.",
+    technical:
+      'After onSessionChanged(), sessionReady is false. The first accepted frame must be armed=false to establish the baseline. Only then can a subsequent armed=true frame arm the vehicle. An armed=true frame before baseline is rejected but still consumes its seq.',
+    why: 'Without the baseline gate, a browser that refreshes while armed could immediately resume driving with stale state — a dangerous reconnect bug.',
+    safetyImpact:
+      'Eliminates an entire class of accidental-motion-on-reconnect bugs by forcing an explicit, safe handoff.',
+  },
+  'message-ordering': {
+    title: 'Message ordering (seq)',
+    plain:
+      'Only the highest sequence number advances — stale or duplicate frames are silently dropped.',
+    technical:
+      'isNewerFrame() returns frame.seq > lastSeq. If seq <= lastSeq, the frame is rejected without ACK. lastSeq resets to -1 on session change. A frame rejected for armed-before-baseline still consumes its seq.',
+    why: 'Networks can delay, reorder, or replay frames. Seq prevents a stale command from overriding a newer one.',
+  },
+  'ttl-watchdog': {
+    title: 'TTL watchdog',
+    plain:
+      'If the operator says "drive forward" and then the network silently disappears, the robot stops on its own.',
+    technical:
+      "CONTROL_TTL_MS = 500ms. The firmware's watchTtl() checks if the vehicle is armed and no accepted frame has arrived within the TTL window. Heartbeat re-sends every 150ms (DEFAULT_RHYTHM.heartbeatMs), test-enforced to stay below TTL/2. The device uses its own millis() clock, not the browser's sentAt.",
+    why: 'Without TTL, a network dropout would leave the robot driving on its last command indefinitely — the watchdog is the autonomous safety net.',
+    safetyImpact:
+      'The heartbeat margin (150ms × 2 = 300ms < 500ms TTL) ensures ordinary jitter never trips the watchdog, while real disconnects are caught within half a second.',
+  },
+  'emergency-stop': {
+    title: 'Emergency stop',
+    plain:
+      'A distinct safety command that bypasses every gate — session, seq, baseline, armed, TTL — and always works.',
+    technical:
+      'emergency-stop is a separate message type, deliberately session/seq-independent. The relay forwards it without stamping controlSessionId. The firmware\'s onEmergencyStopReceived goes straight to enterSafeState("emergency"). Always acked immediately (never delayed like normal control ACK). Controller disconnect also triggers E-stop (gated on registered).',
+    why: 'Normal control has gates for safety, but those same gates could prevent a timely stop in an emergency. E-stop exists outside the gate chain.',
+    safetyImpact:
+      'E-stop is the only path that works regardless of session state, armed state, or link status.',
+  },
 };
 
 export const EN_UI: UiStrings = {

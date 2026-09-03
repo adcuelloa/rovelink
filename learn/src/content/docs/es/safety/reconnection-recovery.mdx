@@ -1,0 +1,133 @@
+---
+title: Recuperación tras reconexión
+description: ¿Qué sucede antes de que una nueva conexión sea confiable para conducir?
+---
+
+import SafetyPath from '../../../../components/shared/SafetyPath.astro';
+import Eyebrow from '../../../../components/shared/Eyebrow.astro';
+import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx';
+
+<Eyebrow>Seguridad y Autoridad</Eyebrow>
+
+<SafetyPath current="armed" />
+
+## La cadena completa de recuperación segura
+
+Después de una desconexión, el sistema atraviesa una secuencia estricta antes de que el robot pueda conducir de nuevo. Cada paso es obligatorio. Ningún paso puede saltarse.
+
+## Paso 1: Conexión perdida → parada segura
+
+El enlace se cae. Ya sea `watchNetwork()` / `watchWssLink()` lo detecta (establece `linkAlive = false`, activa `enterSafeState("link-lost")`), o el watchdog TTL se activa después de 500ms (`enterSafeState("ttl")`). De cualquier manera, el robot se detiene.
+
+## Paso 2: Conexión restablecida → WebSocket se abre
+
+El navegador abre un nuevo WebSocket al relay. La capa de transporte se conecta. No existe autoridad de control aún — esto es solo una conexión cruda.
+
+## Paso 3: Registrarse con el relay → credencial verificada
+
+El navegador envía `controller.register` con su credencial. El relay llama a `#handleControllerRegister()`, que:
+
+1. Verifica las credenciales mediante `verifyCredential()`
+2. Verifica si hay un controlador registrado existente (rechaza si está ocupado)
+3. Degradar controladores obsoletos
+
+## Paso 4: El relay acuña nueva sesión de control → controller.session enviado
+
+El relay llama a `crypto.randomUUID()` para acuñar un nuevo `controlSessionId`. Luego:
+
+1. Envía `controller.session` al dispositivo — **antes** de retornar, garantizando que el dispositivo vea la sesión antes que cualquier frame
+2. Envía `controller.session` al propio controlador — para que el navegador sepa que su registro es autoritativo
+
+## Paso 5: El navegador recibe sesión establecida → establishSessionBaseline
+
+La capa de transporte del navegador recibe el mensaje `controller.session`. Esto emite un evento `session-established`. El manejador de la vista de control llama a `sender.establishSessionBaseline()`, que envía incondicionalmente `SAFE_STATE` — desarmado, a cero, sin esperar al ritmo.
+
+Este frame evita `decideSend()` porque el ritmo normal lo omitiría (desarmado+inactivo = omitir). Pero este frame _debe_ salirse — el firmware está esperándolo.
+
+## Paso 6: El firmware adopta nueva sesión → onSessionChanged
+
+El firmware recibe el mensaje `controller.session` y ejecuta `onSessionChanged()`:
+
+```cpp
+void onSessionChanged(const char *sessionId) {
+  enterSafeState("session-change");
+  strlcpy(activeSession, sessionId, sizeof(activeSession));
+  lastSeq = -1;
+  sessionReady = false;
+}
+```
+
+Estado seguro. Nuevo ID de sesión. Seq restablecido. Compuerta de línea base cerrada.
+
+## Paso 7: El firmware recibe línea base desarmada → sessionReady=true
+
+El frame de línea base del navegador llega. Se ejecuta `applyControlFrame()`:
+
+- La sesión coincide ✓
+- El seq es válido ✓
+- `sessionReady` es `false`, el frame es `armed: false` → `sessionReady = true`
+- El estado desarmado se aplica (que ya es estado seguro — sin cambio en los motores)
+
+La línea base está establecida. El firmware ahora está listo para aceptar frames armados.
+
+## Paso 8: El operador arma explícitamente → armed=true aceptado
+
+El operador presiona el botón de armado. El navegador envía un frame con `armed: true`. Se ejecuta `applyControlFrame()`:
+
+- La sesión coincide ✓
+- El seq es válido ✓
+- `sessionReady` es `true` → flujo normal
+- `armed: true` → el estado de conducción se aplica
+
+## Paso 9: Frames de control aceptados → conducción
+
+El robot ahora está conduciendo. Los heartbeats mantienen alimentado el TTL. La cadena completa de seguridad está activa.
+
+## Por qué recargar ≠ continuar conduciendo
+
+Cuando el operador refresca el navegador, el sistema NO reanuda la conducción automáticamente. La razón:
+
+1. El relay acuña un **nuevo** `controlSessionId`
+2. El firmware entra al estado seguro en el cambio de sesión
+3. El navegador debe enviar una línea base desarmada
+4. El operador debe armar explícitamente
+
+Esta cadena garantiza que una recarga de página, una restauración de pestaña o un reinicio del navegador nunca causen que el robot reanude la conducción sin la intención explícita del operador.
+
+## La escalera de autoridad
+
+Cada paso otorga más autoridad. Ningún paso puede saltarse:
+
+```
+CONECTADO            → WebSocket abierto, sin autoridad
+REGISTRADO           → Credencial verificada, el relay acepta el socket
+SESIÓN ACTUAL        → controlSessionId acuñado, dispositivo notificado
+LÍNEA BASE LISTA    → sessionReady = true, línea base desarmada aceptada
+ARMADO               → Operador armó explícitamente
+CONTROL FRESCO       → Conducción con watchdog TTL activo
+```
+
+Una conexión en un paso inferior no puede realizar las acciones de un paso superior. Un controlador registrado no puede conducir sin una sesión. Una sesión no puede armarse sin una línea base. Una línea base no puede conducir sin un armado explícito.
+
+---
+
+<KnowledgeCheck
+  question="Después de que el navegador se reconecta, ¿puede el robot continuar inmediatamente donde lo dejó?"
+  answer="No. El relay acuña un nuevo controlSessionId, el firmware entra al estado seguro en el cambio de sesión, el navegador debe enviar una línea base desarmada y el operador debe armar explícitamente. Cada paso es obligatorio. Una recarga de página nunca causa una reanudación automática de la conducción."
+/>
+
+---
+
+<KnowledgeCheck
+  question="¿Qué debe ser cierto antes de que el robot pueda conducir de nuevo de forma segura?"
+  answer="Se deben cumplir seis condiciones: (1) WebSocket conectado, (2) controlador registrado con el relay, (3) el relay acuñó un nuevo controlSessionId y envió controller.session al dispositivo, (4) el navegador envió una línea base desarmada y el firmware estableció sessionReady=true, (5) el operador envió explícitamente armed=true, (6) frames de control válidos llegando dentro del TTL. Ningún paso puede saltarse."
+/>
+
+---
+
+### Evidencia de código fuente
+
+- `firmware/rovelink_device/rovelink_device.ino` — `onSessionChanged()`, compuerta de sesión lista en `applyControlFrame()`
+- `web/src/transport/sender.ts` — `establishSessionBaseline()`
+- `web/src/control-view.ts` — manejador de `session-established`
+- `relay/src/room.ts` — `#handleControllerRegister()`, `#sendControlSession()`

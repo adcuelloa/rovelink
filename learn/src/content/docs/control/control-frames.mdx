@@ -157,6 +157,8 @@ ControlSender decides to send. It calls `decideSend()` against the rhythm and ge
 
 The WebSocket transport encodes the frame as JSON and sends it over the wire. The relay receives it, stamps `controlSessionId`, and forwards it to the device. The firmware validates the frame — checks `v`, verifies `controlSessionId` matches the active session, calls `isNewerFrame()`, calls `isFrameExpired()`, and only then applies the driving state to the motors.
 
+See how firmware decides whether this frame is still safe → [Safety & Authority](/safety/safe-state/)
+
 ---
 
 <KnowledgeCheck

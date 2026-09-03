@@ -196,6 +196,54 @@ export const ES_CONCEPTS: Record<string, ConceptCopy> = {
       'El firmware lo envía solo después de que un frame pasa la validación de sesión/secuencia y su estado resultante ya fue aplicado — nunca para un frame rechazado. El navegador lo correlaciona contra una marca de tiempo de envío pendiente rastreada localmente (PendingAckTracker) para calcular el RTT de control, mantenido deliberadamente separado del RTT del relevo (un simple ping/pong al borde).',
     why: 'El RTT del relevo solo prueba que el camino de red hacia Cloudflare es rápido; el ACK de control es la única señal que prueba que el robot físico realmente hizo algo, por eso nunca se combinan en un solo número.',
   },
+  'safe-state': {
+    title: 'Estado seguro',
+    plain:
+      'El estado conocido al que el robot cae cuando algo sale mal — todos los ejes a cero, desarmado.',
+    technical:
+      "SAFE_STATE: { throttle: 0, steering: 0, gripper: 'idle', armed: false }. enterSafeState() lo aplica sincrónicamente, detiene motores y apaga el LED de enlace. Se invoca en cambio de sesión, desarmado, expiración TTL, pérdida de enlace y parada de emergencia.",
+    why: 'Un fallback único y explícito evita paradas parales o rearmado accidental — el robot está bajo control activo o en estado seguro.',
+    safetyImpact:
+      'Cada ruta de seguridad converge al mismo estado conocido, por lo que el comportamiento del robot tras cualquier fallo es predecible.',
+  },
+  'safe-baseline': {
+    title: 'Línea base segura',
+    plain:
+      'Una sesión nueva debe enviar un frame desarmado antes de poder armar — evitando que el estado armado cacheado del navegador se herede tras una reconexión.',
+    technical:
+      'Después de onSessionChanged(), sessionReady es false. El primer frame aceptado debe ser armed=false para establecer la línea base. Solo entonces un frame armed=true posterior puede armar el vehículo. Un frame armed=true antes de la línea base se rechaza pero aún consume su seq.',
+    why: 'Sin la compuerta de línea base, un navegador que se recarga mientras está armado podría reanudar la conducción inmediatamente con estado obsoleto.',
+    safetyImpact:
+      'Elimina una clase completa de bugs de movimiento-accidental-en-reconexión al forzar un handoff explícito y seguro.',
+  },
+  'message-ordering': {
+    title: 'Orden de mensajes (seq)',
+    plain:
+      'Solo el número de secuencia más alto avanza — frames obsoletos o duplicados se descartan silenciosamente.',
+    technical:
+      'isNewerFrame() retorna frame.seq > lastSeq. Si seq <= lastSeq, el frame se rechaza sin ACK. lastSeq se restablece a -1 en cambio de sesión. Un frame rechazado por armed-before-baseline aún consume su seq.',
+    why: 'Las redes pueden retrasar, reordenar o repetir frames. Seq evita que un comando obsoleto reemplace uno más nuevo.',
+  },
+  'ttl-watchdog': {
+    title: 'Watchdog TTL',
+    plain:
+      'Si el operador dice "avanza" y luego la red desaparece silenciosamente, el robot se detiene solo.',
+    technical:
+      'CONTROL_TTL_MS = 500ms. watchTtl() del firmware verifica si el vehículo está armado y ningún frame aceptado ha llegado dentro de la ventana TTL. El heartbeat reenvía cada 150ms (DEFAULT_RHYTHM.heartbeatMs), forzado por test para mantenerse por debajo de TTL/2. El dispositivo usa su propio reloj millis(), no el sentAt del navegador.',
+    why: 'Sin TTL, una caída de red dejaría al robot conduciendo con su último comando indefinidamente — el watchdog es la red de seguridad autónoma.',
+    safetyImpact:
+      'El margen del heartbeat (150ms × 2 = 300ms < 500ms TTL) asegura que el jitter normal nunca active el watchdog, mientras que las desconexiones reales se detectan en menos de medio segundo.',
+  },
+  'emergency-stop': {
+    title: 'Parada de emergencia',
+    plain:
+      'Un comando de seguridad distinto que omite cada compuerta — sesión, seq, línea base, armado, TTL — y siempre funciona.',
+    technical:
+      'emergency-stop es un tipo de mensaje separado, deliberadamente independiente de sesión/seq. El relay lo reenvía sin estampar controlSessionId. onEmergencyStopReceived del firmware va directo a enterSafeState("emergency"). Siempre se responde con ACK inmediatamente (nunca retrasado como el ACK de control normal). La desconexión del controlador también activa E-stop (condicionado a registered).',
+    why: 'El control normal tiene compuertas por seguridad, pero esas mismas compuertas podrían impedir una parada oportuna en una emergencia. E-stop existe fuera de la cadena de compuertas.',
+    safetyImpact:
+      'E-stop es la única ruta que funciona independientemente del estado de sesión, estado armado o estado del enlace.',
+  },
 };
 
 export const ES_UI: UiStrings = {
