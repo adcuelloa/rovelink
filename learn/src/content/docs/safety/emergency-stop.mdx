@@ -17,6 +17,15 @@ Normal control has gates: session check, seq check, baseline check, armed check,
 
 Emergency stop exists for this.
 
+## Two gates, not one
+
+Everything below this point describes the **firmware-side** bypass — what happens once an E-stop message has actually reached the device. But it has to get there first, and that first step is not bypassed:
+
+1. **Relay admission gate** — the WebSocket must already be registered and authenticated with the room. An unregistered socket's messages are dropped by the relay before they reach the device at all (`relay/src/room.ts`) — this includes a would-be E-stop.
+2. **Firmware bypass** — only once a message clears gate 1 does the firmware's session/seq/baseline-independent handling described below apply.
+
+So "E-stop bypasses every gate" is true of gate 2, the firmware, but not of gate 1 — an E-stop from a connection the relay never admitted never reaches the firmware to be bypassed-through.
+
 ## E-stop is a distinct message type
 
 E-stop is not a `ControlFrame`. It is a separate message type: `'emergency-stop'`. From `protocol/src/protocol.ts`:
@@ -90,11 +99,13 @@ This is gated on `registered` — an unauthenticated probe that opens a controll
 E-stop is not just "send throttle=0." The distinction:
 
 - **throttle=0** — An ordinary control state. It goes through all gates: session, seq, baseline, armed. If the session is wrong, it is rejected. If the seq is stale, it is rejected. It is a normal driving command that happens to say "stop."
-- **emergency-stop** — A distinct safety intent. It bypasses every gate. It always works. It is not a driving command — it is a safety command.
+- **emergency-stop** — A distinct safety intent. Once past the relay admission gate above, it bypasses every firmware-side gate — session, seq, baseline, armed. It is not a driving command — it is a safety command.
 
-## E-stop always gets an ACK
+## The firmware always emits an ACK — receipt is a different question
 
-The `EmergencyStopAck` echoes the triggering message's `sentAt` — not `seq`, because E-stop is session/seq-independent:
+The firmware side of E-stop is unconditional: `onEmergencyStopReceived()` always calls `transportSendEmergencyStopAck()` immediately after entering safe state, with no gate that could suppress it. That's a guarantee about **emission**.
+
+It is not a guarantee about **receipt**. The ack travels back over the same best-effort WebSocket path as telemetry — forwarded once by the relay, with no ack-of-ack and no retry if the browser's connection is momentarily down. If the link is bad enough that the ack doesn't make it back, the robot has still stopped; the operator's UI just doesn't have confirmation of that fact yet.
 
 ```typescript
 export interface EmergencyStopAck extends Envelope {
@@ -103,7 +114,7 @@ export interface EmergencyStopAck extends Envelope {
 }
 ```
 
-The browser uses this to match the ACK against its pending E-stop RTT measurement.
+The `EmergencyStopAck` echoes the triggering message's `sentAt` — not `seq`, because E-stop is session/seq-independent. The browser uses this to match the ACK against its pending E-stop RTT measurement, when it arrives.
 
 ---
 
@@ -131,4 +142,4 @@ The browser uses this to match the ACK against its pending E-stop RTT measuremen
 
 ### Up next
 
-**Failure Scenarios** — Which safety mechanism should react?
+You just learned the two gates E-stop passes through — relay admission, then an unconditional firmware bypass — and the emission-vs-receipt distinction for its ACK. Now let's walk through concrete failures and see which mechanism actually catches each one. → [Failure Scenarios](/safety/failure-scenarios/)

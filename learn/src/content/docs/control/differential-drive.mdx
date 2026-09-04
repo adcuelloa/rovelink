@@ -97,9 +97,9 @@ The motor driver can't accept values outside -1..1. `clampAxis()` caps the outpu
 
 ## Shared function
 
-The `differentialMix()` in `protocol/src/mix.ts` is identical to `applyMotors()` in the firmware. The dashboard and the robot compute the exact same result.
+The `differentialMix()` in `protocol/src/mix.ts` and `applyMotors()` in the firmware compute the same formula — but they are two independent implementations, one in TypeScript and one in C++, not a literally shared dependency. The protocol package can't be imported into the ESP32 build, so the firmware carries its own copy of the math.
 
-This matters. When the dashboard shows "left wheel: 0.8, right wheel: 0.4", that's not an approximation. It's the exact numbers the firmware will apply. If the mix formula changes, it changes in both places at once — the protocol package is a shared dependency.
+This matters for what you can trust: when the dashboard shows "left wheel: 0.8, right wheel: 0.4", that's the TypeScript implementation's answer, not a guarantee of what the firmware computed. If the formula ever needs to change, it has to change in both places by hand — there's no single source of truth enforcing they stay identical beyond careful maintenance and matching test suites.
 
 ## PWM — from abstract to motor power
 
@@ -172,4 +172,4 @@ Try the **Differential Drive Lab** to see this in action — adjust throttle and
 
 ### Up next
 
-**Rhythm & Heartbeats** — The sender asks `decideSend()` for a decision. Here's how that decision works.
+You just learned how throttle and steering become two wheel PWM values — the last stop in the Control pipeline. But the browser and the robot aren't on the same machine. Next question: how does this state actually reach the robot? → [Why a Relay?](/network/why-relay/)

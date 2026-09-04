@@ -106,7 +106,7 @@ If the link drops while armed, the robot stops immediately — it does not wait 
 
 ## The tradeoff
 
-A shorter timeout (say 100ms) would fail-safe faster, but would also trip on ordinary jitter. A longer timeout (say 2000ms) would be more tolerant of bad connections, but the robot would keep driving for 2 seconds after the controller disappears. The 500ms value balances these concerns for typical home/office networks.
+A shorter timeout (say 100ms) would fail-safe faster, but risks tripping on transient jitter. A longer timeout (say 2000ms) would be more tolerant of transient hiccups, but the robot would keep driving for up to 2 seconds after the controller actually disappears. 500ms is the value RoveLink ships with — the specific number is a configured trade-off point between these two failure modes, not a figure derived from measured network data.
 
 ---
 
@@ -119,7 +119,7 @@ A shorter timeout (say 100ms) would fail-safe faster, but would also trip on ord
 
 <KnowledgeCheck
   question="Why is heartbeatMs set to 150ms instead of 50ms?"
-  answer="The heartbeat rate is constrained by the test-enforced margin: heartbeatMs * 2 <= CONTROL_TTL_MS. At 150ms, two heartbeat cycles (300ms) leave 200ms of jitter margin within the 500ms TTL. A faster heartbeat (50ms) would waste bandwidth on normal connections with no meaningful safety benefit — the 200ms margin is already sufficient for typical Internet/Wi-Fi jitter."
+  answer="The heartbeat rate is constrained by the test-enforced margin: heartbeatMs * 2 <= CONTROL_TTL_MS. At 150ms, two heartbeat cycles (300ms) leave 200ms of margin within the 500ms TTL before the watchdog could fire. A faster heartbeat (50ms) would send more traffic for a wider margin the test doesn't require — 150ms is the value the codebase currently ships and enforces via that assertion."
 />
 
 ---
@@ -135,4 +135,4 @@ A shorter timeout (say 100ms) would fail-safe faster, but would also trip on ord
 
 ### Up next
 
-**Emergency Stop** — When the operator needs the robot to stop NOW, regardless of normal control state.
+You just learned that the real device watchdog runs on its own clock and ignores the wire's `sentAt`/`ttlMs` entirely. But the watchdog still takes up to 500ms to react. What if the operator can't wait that long? → [Emergency Stop](/safety/emergency-stop/)

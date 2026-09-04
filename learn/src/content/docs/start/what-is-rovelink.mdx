@@ -28,7 +28,7 @@ RoveLink lets you drive a real robot, over the internet, from a browser tab. Tha
 A robot obeying stale or out-of-order commands is a safety problem, not a bug report. RoveLink is built around a handful of rules that make that impossible by construction:
 
 - **Latest state wins.** There is no command queue anywhere in the pipeline — from the browser down to the firmware. An old command can never play back after a newer one has already arrived.
-- **A watchdog, not good faith.** Every driving message carries an expiry. If messages stop arriving — Wi-Fi drops, a tab freezes, Cloudflare hiccups — the robot stops on its own, well before anyone would notice something is wrong.
+- **A watchdog, not good faith.** The robot itself is watching the clock, not trusting the browser to say when something's wrong. If messages stop arriving — Wi-Fi drops, a tab freezes, Cloudflare hiccups — the robot stops on its own within its watchdog window, without waiting for the operator to notice or intervene.
 - **Sessions, not just sequence numbers.** Reconnecting mints a brand-new authority. A delayed message from before the reconnect can never sneak back in and override what's current.
 
 You'll see all three of these live, with real numbers, in the [Control Flow Lab](/labs/control-pipeline/).

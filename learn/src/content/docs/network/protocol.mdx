@@ -96,7 +96,7 @@ Key fields:
 - **`throttle`/`steering`** — the driving intent, -1 to 1.
 - **`armed`** — whether motors are enabled.
 
-The `ttlMs` field is how the system detects stale commands — when no fresh frame arrives within the TTL window, the device stops. The full details of this "link watchdog" behavior are covered in the Safety module.
+The `sentAt`/`ttlMs` pair is what the protocol package's `isFrameExpired()` helper uses to detect a stale command — but the real ESP32 firmware does not call that helper or read these two fields when applying a frame. The device's actual link watchdog runs on its own clock instead. The full details, including this distinction, are covered in the Safety module.
 
 <KnowledgeCheck
   question="Why does the device use `controlSessionId` to reject old frames, instead of just checking `seq`?"
@@ -116,7 +116,7 @@ If any check fails, the message is silently dropped. The firmware never trusts t
 
 ## Key takeaway
 
-The protocol is a versioned, typed envelope format. Every message has `v` and `type`. The `control` frame carries throttle, steering, gripper, armed state, and a TTL that acts as a link watchdog.
+The protocol is a versioned, typed envelope format. Every message has `v` and `type`. The `control` frame carries throttle, steering, gripper, armed state, and a `sentAt`/`ttlMs` pair — the device's actual link watchdog is a separate, local-clock mechanism, covered in the Safety module.
 
 ## Dive deeper
 

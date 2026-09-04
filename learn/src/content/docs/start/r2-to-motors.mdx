@@ -19,9 +19,9 @@ The journey below traces a single realistic command: **DualSense R2 = 0.72, Left
 3. **Ownership** — gamepad is the active source
 4. **ControlEngine** — stores throttle 0.72, steering -0.18 as current desired state
 5. **ControlSender** — decides "rate" (significant change, within budget)
-6. **ControlFrame** — builds `{seq, sentAt, ttlMs, state}`
+6. **ControlFrame** — builds `{v, type, seq, sentAt, ttlMs, throttle, steering, gripper, armed}` — a flat object, not a nested one
 7. **Relay** — stamps `controlSessionId`, forwards to device
-8. **Firmware** — validates session, seq, applies state
+8. **Firmware** — validates session, seq, applies state (its watchdog runs separately, on its own clock — it doesn't read `sentAt`/`ttlMs` from this frame)
 9. **Differential mix** — left = 0.54, right = 0.90
 10. **ACK** — firmware confirms "I did that"
 

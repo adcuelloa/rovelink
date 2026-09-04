@@ -38,7 +38,9 @@ export function LocalRemoteVisualizer() {
             </div>
             <div className="rl-local-remote__arrow">
               <span className="rl-local-remote__hop">LAN</span>
-              <span className="rl-local-remote__latency rl-local-remote__latency--fast">~1ms</span>
+              <span className="rl-local-remote__latency rl-local-remote__latency--fast">
+                ~1ms (illustrative)
+              </span>
             </div>
             <div className="rl-local-remote__node rl-local-remote__node--device">
               <span className="rl-local-remote__icon">🤖</span>
@@ -53,7 +55,7 @@ export function LocalRemoteVisualizer() {
             </div>
             <div className="rl-local-remote__arrow">
               <span className="rl-local-remote__hop">WSS</span>
-              <span className="rl-local-remote__latency">~50ms</span>
+              <span className="rl-local-remote__latency">~50ms (illustrative)</span>
             </div>
             <div className="rl-local-remote__node rl-local-remote__node--relay">
               <span className="rl-local-remote__icon">☁️</span>
@@ -61,7 +63,7 @@ export function LocalRemoteVisualizer() {
             </div>
             <div className="rl-local-remote__arrow">
               <span className="rl-local-remote__hop">WSS</span>
-              <span className="rl-local-remote__latency">~50ms</span>
+              <span className="rl-local-remote__latency">~50ms (illustrative)</span>
             </div>
             <div className="rl-local-remote__node rl-local-remote__node--device">
               <span className="rl-local-remote__icon">🤖</span>

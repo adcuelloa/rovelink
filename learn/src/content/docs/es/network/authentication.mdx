@@ -63,7 +63,7 @@ Si un par envía un token incorrecto:
 
 El firmware y el navegador manejan `AUTH_FAILED` de manera diferente:
 
-- **Firmware**: registra el error, no reconecta (el operador necesita arreglar el secret)
+- **Firmware**: su manejador de desconexión llama a `scheduleRetry()` incondicionalmente — no distingue por código o motivo de cierre, así que sigue reintentando con su backoff normal incluso después de `AUTH_FAILED`. Un secret incorrecto no detiene el bucle de reintentos por sí solo; el operador igual necesita arreglar el secret, pero el dispositivo no se rinde visiblemente.
 - **Navegador**: muestra un error al usuario
 
 <KnowledgeCheck

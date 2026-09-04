@@ -63,7 +63,7 @@ If a peer sends a bad token:
 
 The firmware and browser handle `AUTH_FAILED` differently:
 
-- **Firmware**: logs the error, does not reconnect (operator needs to fix the secret)
+- **Firmware**: its disconnect handler calls `scheduleRetry()` unconditionally — it does not branch on close code or reason, so it keeps retrying with its normal backoff even after `AUTH_FAILED`. A bad secret does not stop the retry loop on its own; the operator still needs to fix the secret, but the device won't visibly give up.
 - **Browser**: shows an error to the user
 
 <KnowledgeCheck

@@ -17,6 +17,15 @@ El control normal tiene compuertas: verificación de sesión, verificación de s
 
 La parada de emergencia existe para esto.
 
+## Dos compuertas, no una
+
+Todo lo que sigue describe la evasión **del lado del firmware** — lo que pasa una vez que un mensaje de parada de emergencia ya llegó al dispositivo. Pero primero tiene que llegar, y ese primer paso no se evade:
+
+1. **Compuerta de admisión del relay** — el WebSocket ya debe estar registrado y autenticado con la sala. Los mensajes de un socket no registrado se descartan en el relay antes de llegar al dispositivo (`relay/src/room.ts`) — esto incluye una posible parada de emergencia.
+2. **Evasión del firmware** — solo una vez que un mensaje pasa la compuerta 1 se aplica el manejo independiente de sesión/seq/línea base que se describe abajo.
+
+Entonces "la parada de emergencia evita cada compuerta" es cierto para la compuerta 2, el firmware, pero no para la compuerta 1 — una parada de emergencia de una conexión que el relay nunca admitió jamás llega al firmware para ser evadida.
+
 ## La parada de emergencia es un tipo de mensaje distinto
 
 La parada de emergencia no es un `ControlFrame`. Es un tipo de mensaje separado: `'emergency-stop'`. Desde `protocol/src/protocol.ts`:
@@ -90,11 +99,13 @@ Esto está comprobado en `registered` — una sonda no autenticada que abre una 
 La parada de emergencia no es simplemente "enviar throttle=0." La distinción:
 
 - **throttle=0** — Un estado de control ordinario. Pasa por todas las compuertas: sesión, seq, línea base, armed. Si la sesión es incorrecta, se rechaza. Si el seq está obsoleto, se rechaza. Es un comando de conducción normal que casualmente dice "detenerse."
-- **emergency-stop** — Una intención de seguridad distinta. Evita cada compuerta. Siempre funciona. No es un comando de conducción — es un comando de seguridad.
+- **emergency-stop** — Una intención de seguridad distinta. Una vez pasada la compuerta de admisión del relay de arriba, evita cada compuerta del lado del firmware — sesión, seq, línea base, armed. No es un comando de conducción — es un comando de seguridad.
 
-## La parada de emergencia siempre recibe una confirmación
+## El firmware siempre emite una confirmación — la recepción es otra cuestión
 
-El `EmergencyStopAck` repite el `sentAt` del mensaje que lo desencadenó — no el `seq`, porque la parada de emergencia es independiente de sesión/seq:
+El lado del firmware de la parada de emergencia es incondicional: `onEmergencyStopReceived()` siempre llama a `transportSendEmergencyStopAck()` inmediatamente después de entrar al estado seguro, sin ninguna compuerta que pueda suprimirlo. Eso es una garantía sobre la **emisión**.
+
+No es una garantía sobre la **recepción**. La confirmación viaja de vuelta por el mismo camino de mejor esfuerzo que la telemetría — reenviada una vez por el relay, sin confirmación-de-confirmación y sin reintento si la conexión del navegador está momentáneamente caída. Si el enlace está lo bastante mal como para que la confirmación no llegue, el robot ya se detuvo de todas formas; simplemente la interfaz del operador aún no tiene esa confirmación.
 
 ```typescript
 export interface EmergencyStopAck extends Envelope {
@@ -103,7 +114,7 @@ export interface EmergencyStopAck extends Envelope {
 }
 ```
 
-El navegador usa esto para emparejar la confirmación con su medición de RTT pendiente de la parada de emergencia.
+El `EmergencyStopAck` repite el `sentAt` del mensaje que lo desencadenó — no el `seq`, porque la parada de emergencia es independiente de sesión/seq. El navegador usa esto para emparejar la confirmación con su medición de RTT pendiente de la parada de emergencia, cuando llega.
 
 ---
 
@@ -131,4 +142,4 @@ El navegador usa esto para emparejar la confirmación con su medición de RTT pe
 
 ### A continuación
 
-**Escenarios de fallo** — ¿Qué mecanismo de seguridad debería reaccionar?
+Acabas de aprender las dos compuertas que atraviesa la parada de emergencia — admisión del relay, luego una evasión incondicional del firmware — y la distinción entre emisión y recepción de su confirmación. Ahora repasemos fallas concretas y veamos qué mecanismo realmente atrapa cada una. → [Escenarios de fallo](/es/safety/failure-scenarios/)

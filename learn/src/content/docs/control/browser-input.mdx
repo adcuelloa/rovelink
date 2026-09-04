@@ -151,7 +151,7 @@ Both input methods produce the same normalized shapes:
 - **Keyboard** → `Axes { throttle, steering }` + `Gripper` + `KeyAction`
 - **Gamepad** → `GamepadInput { throttle, steering, buttons }` (after profile evaluation)
 
-Both flow into the next layer: **Input Ownership** — which answers the question: "What if both are active at once?"
+Keyboard and touch values are already in their final shape — they go straight to Input Ownership. Gamepad values take one more step first: mapping through the active **Controller Profile**, which is where a raw analog reading like "R2 = 0.72" becomes "throttle = 0.72". Keyboard and touch don't have a profile stage at all; only gamepad does.
 
 ## Real examples
 
@@ -184,4 +184,4 @@ Both flow into the next layer: **Input Ownership** — which answers the questio
 
 ## Next
 
-Now that we have two kinds of input — keyboard and gamepad — what happens when both are active at the same time? → [Input Ownership](/control/input-ownership/)
+You just learned how keyboard, touch, and gamepad each produce a normalized `{ throttle, steering }` reading. Gamepad's reading isn't quite done yet, though — it still needs to pass through a **Controller Profile** before it means the same thing keyboard and touch already mean. → [Controller Profiles](/control/controller-profiles/)

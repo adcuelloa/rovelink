@@ -101,9 +101,9 @@ El control engine todavía tiene el estado actual (throttle, steering, armed). E
 
 ## TTL: el watchdog del enlace
 
-Hay una segunda capa de protección: el **TTL del control frame**. Cada control frame lleva un `ttlMs` (por defecto 500ms). Si el dispositivo no recibe un frame nuevo dentro de esa ventana, se detiene. Esta es la forma en que el sistema detecta una conexión perdida a nivel de firmware — no por timeouts ni heartbeats, sino por la ausencia de nuevos comandos.
+Hay una segunda capa de protección a nivel de firmware, y vale la pena ser precisos sobre cómo funciona realmente: el dispositivo corre un watchdog local que detiene al robot si no ha recibido _ningún_ frame válido dentro de 500ms (`CONTROL_TTL_MS`). Esto **no** se implementa leyendo los campos `sentAt`/`ttlMs` de un frame individual — el firmware ignora esos dos campos del cable por completo y en cambio compara su propio reloj contra la marca de tiempo del último frame que aceptó. El efecto es el mismo — "si no llega un frame nuevo a tiempo, detente" — pero el mecanismo es un reloj de llegada del lado del dispositivo, no una verificación de expiración por frame.
 
-Los detalles completos de este comportamiento de "watchdog del enlace" — incluyendo transiciones de estado seguro y apagado de motores — se cubren en el módulo de Seguridad.
+Los detalles completos de este comportamiento — incluyendo transiciones de estado seguro y apagado de motores — se cubren en el módulo de Seguridad.
 
 ## takeaway
 

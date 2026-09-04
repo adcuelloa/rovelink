@@ -101,13 +101,13 @@ The firmware has a TTL watchdog (`CONTROL_TTL_MS = 500ms`). If no valid frame ar
 
 The heartbeat at 150ms provides plenty of margin. Three heartbeats fit in 450ms — that's 50ms of headroom before the watchdog trips. Even if two consecutive heartbeats are dropped by network jitter, the third arrives in time.
 
-This margin is deliberate. Ordinary network conditions — Wi-Fi retransmits, router queuing, browser scheduler delays — can easily add 50-100ms of jitter. The heartbeat frequency keeps the link safe under normal conditions while staying well below the bandwidth cost of continuous sending.
+This margin is deliberate: it's the gap that lets a heartbeat or two go missing to jitter without a false watchdog trip, while staying well below the bandwidth cost of continuous sending.
 
 ## The margin
 
 `heartbeatMs` (150ms) must stay well below `CONTROL_TTL_MS` (500ms).
 
-If `heartbeatMs` were 600ms, ordinary network jitter could trip the watchdog. A single delayed heartbeat would push the gap past 500ms, and the robot would stop even though the operator is still actively driving. The current ratio — 150ms heartbeat vs 500ms TTL — gives a 3:1 margin that handles real-world network conditions gracefully.
+If `heartbeatMs` were 600ms, it would already exceed the 500ms TTL — a single heartbeat interval could trip the watchdog even with a live link. The current ratio, 150ms heartbeat vs 500ms TTL, is a 3:1 margin: at least two full heartbeat cycles fit inside one TTL window before the watchdog can fire.
 
 ## Disarmed + idle skip
 
@@ -171,4 +171,4 @@ The key insight: the heartbeat is not about sending new information. It's about 
 
 ### Up next
 
-**Control Frames** — The sender decides to send. What does the actual message look like?
+You just learned the rhythm that decides when a frame goes out. The sender has made its decision — now what does the actual message on the wire look like? → [Control Frames](/control/control-frames/)

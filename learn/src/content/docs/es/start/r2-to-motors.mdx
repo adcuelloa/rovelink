@@ -19,9 +19,9 @@ El viaje siguiente traza un comando realista: **DualSense R2 = 0.72, Left Stick 
 3. **Propiedad** — el gamepad es la fuente activa
 4. **ControlEngine** — almacena throttle 0.72, steering -0.18 como estado deseado actual
 5. **ControlSender** — decide "rate" (cambio significativo, dentro del presupuesto)
-6. **ControlFrame** — construye `{seq, sentAt, ttlMs, state}`
+6. **ControlFrame** — construye `{v, type, seq, sentAt, ttlMs, throttle, steering, gripper, armed}` — un objeto plano, no anidado
 7. **Relevo** — marca `controlSessionId`, reenvía al dispositivo
-8. **Firmware** — valida sesión, seq, aplica estado
+8. **Firmware** — valida sesión, seq, aplica estado (su watchdog corre por separado, con su propio reloj — no lee `sentAt`/`ttlMs` de este frame)
 9. **Mezcla diferencial** — left = 0.54, right = 0.90
 10. **ACK** — el firmware confirma "ya hice eso"
 

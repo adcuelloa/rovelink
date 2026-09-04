@@ -68,14 +68,14 @@ export default defineConfig({
               slug: 'control/browser-input',
             },
             {
-              label: 'Input Ownership',
-              translations: { es: 'Control de entrada' },
-              slug: 'control/input-ownership',
-            },
-            {
               label: 'Controller Profiles',
               translations: { es: 'Perfiles del controlador' },
               slug: 'control/controller-profiles',
+            },
+            {
+              label: 'Input Ownership',
+              translations: { es: 'Control de entrada' },
+              slug: 'control/input-ownership',
             },
             {
               label: 'ControlEngine',
@@ -146,22 +146,6 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Labs',
-          translations: { es: 'Laboratorios' },
-          items: [
-            {
-              label: 'Control Flow Lab',
-              translations: { es: 'Laboratorio de flujo de control' },
-              slug: 'labs/control-pipeline',
-            },
-            {
-              label: 'Differential Drive Lab',
-              translations: { es: 'Laboratorio de tracción diferencial' },
-              slug: 'labs/differential-drive',
-            },
-          ],
-        },
-        {
           label: 'Safety & Authority',
           translations: { es: 'Seguridad y Autoridad' },
           items: [
@@ -208,9 +192,29 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Observability',
-          translations: { es: 'Observabilidad' },
+          label: 'Practice',
+          translations: { es: 'Práctica' },
           items: [
+            {
+              label: 'Control Flow Lab',
+              translations: { es: 'Laboratorio de flujo de control' },
+              slug: 'labs/control-pipeline',
+            },
+            {
+              label: 'Differential Drive Lab',
+              translations: { es: 'Laboratorio de tracción diferencial' },
+              slug: 'labs/differential-drive',
+            },
+            {
+              label: 'Sessions & Message Ordering Lab',
+              translations: { es: 'Laboratorio de sesiones y orden de mensajes' },
+              slug: 'labs/session-sequence',
+            },
+            {
+              label: 'Connection Safety Lab',
+              translations: { es: 'Laboratorio de seguridad de conexión' },
+              slug: 'labs/ttl',
+            },
             {
               label: 'Latency & Round-Trip Time',
               translations: { es: 'Latencia y tiempo de ida y vuelta' },

@@ -8,7 +8,7 @@ import Eyebrow from '../../../components/shared/Eyebrow.astro';
 
 <Eyebrow>Safety</Eyebrow>
 
-Every driving message carries its own expiry (`CONTROL_TTL_MS`, 500ms in the real protocol). If frames stop arriving — for any reason — the vehicle falls back to safe state on its own, without waiting for anyone to release a key.
+The device watches its own clock (`CONTROL_TTL_MS`, 500ms in the real protocol) since it last accepted a valid frame — not an expiry stamped on any individual message. If frames stop arriving — for any reason — the vehicle falls back to safe state on its own, without waiting for anyone to release a key. See [TTL & Watchdog](/safety/ttl-watchdog/) for the exact firmware mechanism this lab simulates.
 
 <TtlTimeline locale="en" client:only="react" />
 

@@ -86,6 +86,8 @@ Without session IDs, the device might apply the old frame. With them, the device
   answer="The first device is replaced immediately — it receives a DEVICE_REPLACED close code and its connection is closed. The new device takes the slot."
 />
 
+This device-replacement rule is **not** the same policy the room applies to controllers. A second _device_ always replaces the first. A second _live controller_ is rejected outright — the existing one keeps driving. Only a _stale_ controller gets reclaimed. See [Failure Scenarios](/safety/failure-scenarios/) (Scenario 6) for the controller-side rule.
+
 ## Stale detection
 
 The room periodically checks whether each peer is still responsive:

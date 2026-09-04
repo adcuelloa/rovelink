@@ -56,9 +56,9 @@ Todos los campos son requeridos excepto `controlSessionId`, que es opcional en e
 
 **`seq`** — Un número de secuencia monotonamente creciente. El firmware usa `isNewerFrame()` para rechazar frames obsoletos, duplicados, y reordenados. Si el firmware ya procesó `seq: 183`, rechazará `seq: 182` aunque ese frame llegue después. Esta es la defensa principal contra el reordenamiento de red.
 
-**`sentAt`** — `Date.now()` al momento de enviar. Se usa para el cálculo del TTL. El firmware compara `sentAt` contra su propio reloj para determinar si el frame expiró. Por eso el TTL viaja _dentro_ del frame, no como un parámetro separado — el frame lleva su propia expiración.
+**`sentAt`** — `Date.now()` al momento de enviar. El helper `isFrameExpired(frame, now)` del paquete de protocolo puede usar este campo para calcular el TTL — y eso es lo que usan el transporte simulado del navegador y el simulador de este sitio. **El firmware real del ESP32 no lo hace** — nunca lee `sentAt` al aplicar un frame. Ver [TTL y Watchdog](/es/safety/ttl-watchdog/) para lo que el firmware realmente verifica.
 
-**`ttlMs = 500`** — Cuánto tiempo es válido este frame. Después de 500ms, el firmware considera el frame expirado y detiene al robot. El valor por defecto es 500ms, definido como `CONTROL_TTL_MS` en `protocol.ts`. Este valor debe mantenerse bien por encima de `heartbeatMs` (150ms) — un margen apretado haría que el watchdog se active con jitter ordinario de Internet y Wi-Fi, no solo con una pérdida real de enlace.
+**`ttlMs = 500`** — Viaja con el frame por la misma razón que `sentAt`: es lo que usan `isFrameExpired()` y el simulador, no lo que lee el firmware. El firmware tiene su propia constante `TTL_CONTROL_MS` (también 500ms), definida por separado y mantenida sincronizada a mano — ver [TTL y Watchdog](/es/safety/ttl-watchdog/).
 
 **`throttle`, `steering`, `gripper`, `armed`** — El estado de conducción real. Estos son los valores que el firmware aplica a los motores. El rango para `throttle` y `steering` es -1..1, `gripper` es uno de `'idle'`, `'open'`, `'close'`, y `armed` es un booleano.
 
@@ -109,18 +109,18 @@ export const isNewerFrame = (frame: ControlFrame, lastSeq: number): boolean => f
 
 Mayor estricto. Una retransmisión del mismo seq también se rechaza. El seq más alto siempre gana.
 
-## TTL — la red de seguridad
+## TTL — un campo con dos consumidores distintos
 
-El TTL de 500ms es el watchdog del enlace. Si no llega ningún frame nuevo en medio segundo, el firmware asume que el controlador se fue y detiene al robot. Esto maneja la pérdida de conexión — si la pestaña del navegador crashea, el WebSocket se cae, o el relay se baja, el robot no sigue conduciendo para siempre.
-
-La verificación es simple:
+`protocol.ts` define un helper que compara `sentAt` y `ttlMs` contra el tiempo actual:
 
 ```typescript
 export const isFrameExpired = (frame: ControlFrame, now: number): boolean =>
   now - frame.sentAt > frame.ttlMs;
 ```
 
-El heartbeat del sender corre a 150ms — bien por debajo del TTL de 500ms. Eso le da al firmware tres ciclos de heartbeat para recibir un frame fresco antes de que el actual expire. En una conexión ordinaria con jitter normal, el watchdog nunca se activa. Solo se dispara cuando el enlace se perdió realmente.
+Este helper es real y se usa — por el transporte simulado del navegador (`web/src/transport/mock.ts`) y por el simulador de este sitio. **No se llama en ningún lugar del firmware del ESP32.** Esta es una brecha preexistente entre el paquete de protocolo y la implementación del firmware, no algo para memorizar como comportamiento del dispositivo.
+
+El watchdog real que protege al robot físico vive enteramente en el dispositivo y no toca este campo — compara su propio reloj contra la última vez que llegó _cualquier_ frame válido, sin importar lo que dijera el `sentAt`/`ttlMs` de ese frame. El mecanismo completo, con el código del firmware, está en [TTL y Watchdog](/es/safety/ttl-watchdog/) — esa página describe lo que realmente ocurre en el hardware.
 
 ## `createControlFrame()`
 
@@ -155,7 +155,7 @@ ControlSender decide enviar. Llama a `decideSend()` contra el ritmo y recibe una
 
 ## Qué viene después
 
-El transporte WebSocket codifica el frame como JSON y lo envía por el cable. El relay lo recibe, estampa `controlSessionId`, y lo reenvía al dispositivo. El firmware valida el frame — revisa `v`, verifica que `controlSessionId` coincida con la sesión activa, llama a `isNewerFrame()`, llama a `isFrameExpired()`, y solo entonces aplica el estado de conducción a los motores.
+El transporte WebSocket codifica el frame como JSON y lo envía por el cable. El relay lo recibe, estampa `controlSessionId`, y lo reenvía al dispositivo. El firmware valida el frame — revisa `v`, verifica que `controlSessionId` coincida con la sesión activa, aplica el equivalente de `isNewerFrame()` (`seq <= lastSeq` se rechaza), y solo entonces aplica el estado de conducción a los motores. La expiración por TTL se verifica por separado, con el reloj propio del firmware, independientemente de cualquier frame individual — no como una de estas verificaciones por frame.
 
 ---
 
@@ -182,4 +182,4 @@ El transporte WebSocket codifica el frame como JSON y lo envía por el cable. El
 
 ### Siguiente
 
-**Tracción diferencial** — El robot recibe throttle y steering. ¿Cómo se convierte eso en dos velocidades de rueda?
+Acabas de aprender la forma exacta de un ControlFrame, y dónde se usan realmente `sentAt`/`ttlMs` y dónde no. El robot recibe throttle y steering — ¿cómo se convierte eso en dos velocidades de rueda? → [Tracción diferencial](/es/control/differential-drive/)

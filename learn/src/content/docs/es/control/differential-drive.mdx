@@ -95,11 +95,11 @@ throttle: 0.8 + steering: 0.5 = 1.3  ← desbordamiento
 
 El driver del motor no puede aceptar valores fuera de -1..1. `clampAxis()` limita la salida en el límite, así que `1.3` se convierte en `1.0`. El giro es un poco menos cerrado de lo que el operador pretendía, pero el motor recibe una señal válida. El clamping es una red de seguridad, no el camino normal — los valores de entrada bien comportados de `normalizeState()` se mantienen dentro del rango.
 
-## Función compartida
+## Misma fórmula, dos implementaciones
 
-El `differentialMix()` en `protocol/src/mix.ts` es idéntico a `applyMotors()` en el firmware. El dashboard y el robot computan exactamente el mismo resultado.
+El `differentialMix()` en `protocol/src/mix.ts` y `applyMotors()` en el firmware calculan la misma fórmula — pero son dos implementaciones independientes, una en TypeScript y otra en C++, no una dependencia literalmente compartida. El paquete de protocolo no se puede importar en el build del ESP32, así que el firmware lleva su propia copia de la matemática.
 
-Esto importa. Cuando el dashboard muestra "rueda izquierda: 0.8, rueda derecha: 0.4", eso no es una aproximación. Son los números exactos que el firmware aplicará. Si la fórmula de la mezcla cambia, cambia en ambos lugares a la vez — el paquete de protocolo es una dependencia compartida.
+Esto importa para lo que puedes confiar: cuando el dashboard muestra "rueda izquierda: 0.8, rueda derecha: 0.4", esa es la respuesta de la implementación en TypeScript, no una garantía de lo que calculó el firmware. Si la fórmula alguna vez necesita cambiar, hay que cambiarla a mano en ambos lugares — no existe una única fuente de verdad que garantice que se mantengan idénticas más allá del mantenimiento cuidadoso y de suites de pruebas equivalentes.
 
 ## PWM — de abstracto a potencia del motor
 
@@ -172,4 +172,4 @@ Probá el **Differential Drive Lab** para ver esto en acción — ajustá thrott
 
 ### Siguiente
 
-**Ritmo y heartbeats** — El sender le pregunta a `decideSend()` por una decisión. Acá está cómo funciona esa decisión.
+Acabas de aprender cómo throttle y steering se convierten en dos valores PWM de rueda — la última parada del pipeline de Control. Pero el navegador y el robot no están en la misma máquina. Siguiente pregunta: ¿cómo llega realmente este estado al robot? → [¿Por qué un relay?](/es/network/why-relay/)

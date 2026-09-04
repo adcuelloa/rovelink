@@ -96,7 +96,7 @@ Campos clave:
 - **`throttle`/`steering`** — la intención de conducción, -1 a 1.
 - **`armed`** — si los motores están habilitados.
 
-El campo `ttlMs` es cómo el sistema detecta comandos obsoletos — cuando no llega un frame nuevo dentro de la ventana TTL, el dispositivo se detiene. Los detalles completos de este comportamiento de "watchdog del enlace" se cubren en el módulo de Seguridad.
+El par `sentAt`/`ttlMs` es lo que usa el helper `isFrameExpired()` del protocolo para detectar un comando obsoleto — pero el firmware real del ESP32 no llama a ese helper ni lee estos dos campos al aplicar un frame. El watchdog de enlace real del dispositivo corre con su propio reloj. Los detalles completos, incluyendo esta distinción, se cubren en el módulo de Seguridad.
 
 <KnowledgeCheck
   question="¿Por qué el dispositivo usa `controlSessionId` para rechazar frames viejos, en vez de solo verificar `seq`?"
@@ -116,7 +116,7 @@ Si falla alguna verificación, el mensaje se descarta silenciosamente. El firmwa
 
 ## takeaway
 
-El protocolo es un formato de envelope versionado y tipado. Todo mensaje tiene `v` y `type`. El frame `control` lleva throttle, steering, gripper, estado armed, y un TTL que actúa como watchdog del enlace.
+El protocolo es un formato de envelope versionado y tipado. Todo mensaje tiene `v` y `type`. El frame `control` lleva throttle, steering, gripper, estado armed, y un par `sentAt`/`ttlMs` — el watchdog de enlace real del dispositivo es un mecanismo separado, con su propio reloj, cubierto en el módulo de Seguridad.
 
 ## Explorar más
 
