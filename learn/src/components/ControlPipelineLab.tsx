@@ -60,6 +60,7 @@ const STATUS = {
     accepted: 'accepted',
     rejected: (reason: string) => `rejected: ${REASON_EN[reason] ?? reason}`,
     safeState: 'safe state (TTL/E-stop)',
+    linkDown: 'link down — no frame forwarded',
     session: (id: string) => `session ${id}…`,
     gamepad: 'Gamepad',
     profile: 'profile',
@@ -70,6 +71,7 @@ const STATUS = {
     accepted: 'aceptado',
     rejected: (reason: string) => `rechazado: ${REASON_ES[reason] ?? reason}`,
     safeState: 'estado seguro (TTL/parada de emergencia)',
+    linkDown: 'enlace caído — sin frame reenviado',
     session: (id: string) => `sesión ${id}…`,
     gamepad: 'Control',
     profile: 'perfil',
@@ -90,10 +92,14 @@ const REASON_ES: Record<string, string> = {
   'ttl-expired': 'TTL expirado',
 };
 
+// Matches the audited production order: profile evaluation happens inside
+// the gamepad adapter itself, before InputOwnership ever sees a value
+// (keyboard/touch skip the profile stage entirely) — see
+// control/browser-input.mdx and control/controller-profiles.mdx.
 const STAGE_ORDER: readonly (keyof Stages)[] = [
   'input',
-  'ownership',
   'profile',
+  'ownership',
   'engine',
   'sender',
   'frame',
@@ -190,7 +196,21 @@ export function ControlPipelineLab({ locale, ui }: ControlPipelineLabProps) {
           pulse('rtt');
           return;
         case 'ttl-stop':
-          setStages((s) => ({ ...s, firmware: t.safeState }));
+          // The vehicle just fell back to SAFE_STATE — either the watchdog
+          // noticed silence, or an E-stop fired. Reset every downstream
+          // readout that safe state actually implies (zero motors, no more
+          // frames reaching the simulated device), not just the firmware
+          // label — otherwise the mix/relay panels keep showing whatever
+          // the last accepted frame produced, which contradicts "watch the
+          // robot stop on its own."
+          setStages((s) => ({
+            ...s,
+            firmware: t.safeState,
+            mix: { left: 0, right: 0 },
+            relay: t.linkDown,
+          }));
+          pulse('mix');
+          pulse('relay');
           return;
         case 'session-changed':
           setStages((s) => ({ ...s, relay: t.session(event.sessionId.slice(0, 8)) }));

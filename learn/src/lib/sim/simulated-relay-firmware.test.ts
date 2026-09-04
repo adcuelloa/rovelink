@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { createControlFrame, SAFE_STATE } from '@rovelink/protocol';
+import { CONTROL_TTL_MS, createControlFrame, SAFE_STATE } from '@rovelink/protocol';
 import type { ControlState } from '@rovelink/protocol';
 
 import { SimulatedFirmware, SimulatedRelay } from './simulated-relay-firmware.ts';
@@ -91,6 +91,44 @@ test('TTL watchdog: an armed vehicle falls back to safe state once frames stop a
 
   assert.equal(firmware.checkTtl(200), false);
   assert.equal(firmware.checkTtl(10 + 501), true);
+  assert.deepEqual(firmware.state, SAFE_STATE);
+});
+
+test('applyFrame does not reject a frame in-line for a stale sentAt/ttlMs — firmware discards both wire fields on arrival', () => {
+  const relay = new SimulatedRelay();
+  const firmware = new SimulatedFirmware();
+  firmware.onSessionChanged(relay.mintSession());
+  firmware.applyFrame(relay.stamp(createControlFrame(DISARMED, 1, 0)), 0);
+
+  // A frame stamped with sentAt=0 and the default ttlMs, but not actually
+  // *applied* until well past its own ttlMs — isFrameExpired(frame, now)
+  // would report this as expired. Real firmware never asks that question:
+  // it ignores sentAt/ttlMs entirely and only enforces session + seq +
+  // baseline here. Staleness is caught solely by checkTtl()'s local-clock
+  // watchdog (see the next test), never by applyFrame.
+  const staleFrame = relay.stamp(createControlFrame(DRIVING, 2, 0));
+  const now = staleFrame.ttlMs + 10_000; // arrives far past its own ttlMs
+  const outcome = firmware.applyFrame(staleFrame, now);
+
+  assert.equal(
+    outcome.accepted,
+    true,
+    'a late-arriving frame is still accepted on session/seq/baseline grounds alone',
+  );
+});
+
+test('TTL watchdog, not applyFrame, is the only thing that can trip safe state from silence', () => {
+  const relay = new SimulatedRelay();
+  const firmware = new SimulatedFirmware();
+  firmware.onSessionChanged(relay.mintSession());
+  firmware.applyFrame(relay.stamp(createControlFrame(DISARMED, 1, 0)), 0);
+  firmware.applyFrame(relay.stamp(createControlFrame(DRIVING, 2, 10)), 10);
+  assert.equal(firmware.state.armed, true);
+
+  // No further frames arrive. applyFrame is never called again — only the
+  // watchdog's own clock can notice the silence and fall back to safe state.
+  assert.equal(firmware.checkTtl(10 + CONTROL_TTL_MS - 1), false);
+  assert.equal(firmware.checkTtl(10 + CONTROL_TTL_MS + 1), true);
   assert.deepEqual(firmware.state, SAFE_STATE);
 });
 

@@ -16,9 +16,15 @@
  *  - rovelink_device.ino applyControlFrame(): a frame is rejected outright if
  *    its session doesn't match the active one, or if seq <= lastSeq; a fresh
  *    session additionally requires one explicit armed=false frame before any
- *    armed=true frame is honored (the "disarmed baseline").
+ *    armed=true frame is honored (the "disarmed baseline"). It never inspects
+ *    `sentAt`/`ttlMs` — both are explicitly discarded on arrival — so this
+ *    method does not either, even though @rovelink/protocol exports an
+ *    `isFrameExpired()` helper (used by the browser's own transport mock,
+ *    never by firmware; a pre-existing protocol/docs inconsistency, not
+ *    something to replicate here).
  *  - rovelink_device.ino watchTtl(): if armed and no accepted frame arrived
- *    within CONTROL_TTL_MS, the vehicle falls back to SAFE_STATE on its own.
+ *    within CONTROL_TTL_MS, the vehicle falls back to SAFE_STATE on its own —
+ *    this is the ONLY TTL/staleness defense; see checkTtl() below.
  *  - rovelink_device.ino onEmergencyStopReceived(): bypasses session/seq
  *    entirely.
  *
@@ -26,19 +32,13 @@
  * production function from @rovelink/protocol — never a lookalike.
  */
 import type { ControlFrame, ControlState, Wheels } from '@rovelink/protocol';
-import {
-  CONTROL_TTL_MS,
-  SAFE_STATE,
-  differentialMix,
-  isFrameExpired,
-  wheelPwm,
-} from '@rovelink/protocol';
+import { CONTROL_TTL_MS, SAFE_STATE, differentialMix, wheelPwm } from '@rovelink/protocol';
 
 export type FrameOutcome =
   | { readonly accepted: true; readonly state: ControlState; readonly wheels: Wheels }
   | {
       readonly accepted: false;
-      readonly reason: 'wrong-session' | 'stale-seq' | 'armed-before-baseline' | 'ttl-expired';
+      readonly reason: 'wrong-session' | 'stale-seq' | 'armed-before-baseline';
     };
 
 /** One RobotRoom's worth of relay state: which session is authoritative. */
@@ -106,16 +106,21 @@ export class SimulatedFirmware {
   }
 
   /** Mirrors applyControlFrame(). `now` is when this frame reaches the
-   * (simulated) device — after whatever latency the lab experiment applies. */
+   * (simulated) device — after whatever latency the lab experiment applies.
+   *
+   * Deliberately does NOT check `frame.sentAt`/`frame.ttlMs` here: real
+   * firmware discards both wire fields on arrival (`(void)sentAt;
+   * (void)ttlMs;` in applyControlFrame()) and never rejects a frame in-line
+   * for being stale. `isFrameExpired()` from @rovelink/protocol is a real
+   * exported helper, but firmware never calls it — the only TTL defense is
+   * the local-clock watchdog in checkTtl() below, which is why staleness
+   * only ever shows up there, not as a rejection reason from this method. */
   applyFrame(frame: ControlFrame, now: number): FrameOutcome {
     if ((frame.controlSessionId ?? '') !== this.#activeSession) {
       return { accepted: false, reason: 'wrong-session' };
     }
     if (frame.seq <= this.#lastSeq) {
       return { accepted: false, reason: 'stale-seq' };
-    }
-    if (isFrameExpired(frame, now)) {
-      return { accepted: false, reason: 'ttl-expired' };
     }
     this.#lastSeq = frame.seq;
     this.#lastAcceptedAt = now;

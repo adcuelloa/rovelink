@@ -1,5 +1,5 @@
 import type { ControlState } from '@rovelink/protocol';
-import { createControlFrame } from '@rovelink/protocol';
+import { CONTROL_TTL_MS, createControlFrame } from '@rovelink/protocol';
 import { useRef, useState } from 'react';
 
 import { SimulatedFirmware, SimulatedRelay } from '../lib/sim/simulated-relay-firmware.ts';
@@ -60,6 +60,14 @@ const STRINGS = {
     baselineReady: 'Baseline ready',
     armed: 'Armed',
     noEvents: 'Trigger a scenario to see events here.',
+    gateLabels: {
+      CONNECTED: 'CONNECTED',
+      REGISTERED: 'REGISTERED',
+      'CURRENT SESSION': 'CURRENT SESSION',
+      'BASELINE READY': 'BASELINE READY',
+      ARMED: 'ARMED',
+      'FRESH CONTROL': 'FRESH CONTROL',
+    } as Record<SafetyGate, string>,
   },
   es: {
     title: 'Laboratorio de Seguridad y Autoridad',
@@ -90,6 +98,14 @@ const STRINGS = {
     baselineReady: 'Línea base lista',
     armed: 'Armado',
     noEvents: 'Dispara un escenario para ver eventos aquí.',
+    gateLabels: {
+      CONNECTED: 'CONECTADO',
+      REGISTERED: 'REGISTRADO',
+      'CURRENT SESSION': 'SESIÓN ACTUAL',
+      'BASELINE READY': 'LÍNEA BASE LISTA',
+      ARMED: 'ARMADO',
+      'FRESH CONTROL': 'CONTROL VIGENTE',
+    } as Record<SafetyGate, string>,
   },
 } as const;
 
@@ -115,11 +131,7 @@ function resolveGates(
   armed: boolean,
 ): readonly SafetyGate[] {
   const gates: SafetyGate[] = ['CONNECTED', 'REGISTERED'];
-  if (
-    outcome.accepted ||
-    outcome.reason === 'ttl-expired' ||
-    outcome.reason === 'armed-before-baseline'
-  ) {
+  if (outcome.accepted || outcome.reason === 'armed-before-baseline') {
     gates.push('CURRENT SESSION');
   }
   if (baselineReady) gates.push('BASELINE READY');
@@ -193,8 +205,6 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
         reason = t.reasonRejectSeq;
       } else if (outcome.reason === 'armed-before-baseline') {
         reason = t.reasonRejectBaseline;
-      } else if (outcome.reason === 'ttl-expired') {
-        reason = t.reasonRejectTtl;
       }
     }
 
@@ -235,8 +245,21 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
   }
 
   function handleDropNetwork(): void {
-    pushLog({ label: t.dropNetwork, decision: 'SAFE STOP', reason: t.reasonRejectTtl, gates });
-    setIsArmed(false);
+    // Real firmware never rejects a single frame in-line for staleness — the
+    // only TTL defense is the local watchdog, which trips on its own once no
+    // frame has been accepted for CONTROL_TTL_MS, independent of any frame
+    // arriving. Simulate that silence directly by advancing the clock past
+    // the threshold and asking the watchdog whether it would trip, instead
+    // of hand-asserting the outcome.
+    const now = performance.now() + CONTROL_TTL_MS + 1;
+    const tripped = firmwareRef.current.checkTtl(now);
+    setIsArmed(firmwareRef.current.state.armed);
+    pushLog({
+      label: t.dropNetwork,
+      decision: tripped ? 'SAFE STOP' : 'ACCEPT',
+      reason: tripped ? t.reasonRejectTtl : t.reasonAccept,
+      gates,
+    });
   }
 
   function handleReplayOldSeq(): void {
@@ -561,7 +584,7 @@ function AuthorityLadder({
               <span style={{ marginRight: '0.4rem', opacity: reached ? 1 : 0.4 }}>
                 {reached ? '▶' : '○'}
               </span>
-              {gate}
+              {strings.gateLabels[gate]}
             </li>
           );
         })}
