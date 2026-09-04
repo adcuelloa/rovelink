@@ -92,7 +92,7 @@ Campos clave:
 
 - **`seq`** — número de secuencia. Mayor siempre gana. Frames viejos con `seq` menor se descartan.
 - **`sentAt`** — el reloj del navegador cuando se creó el frame.
-- **`ttlMs`** — tiempo de vida. Después de esta cantidad de milisegundos, el robot ignora el frame.
+- **`ttlMs`** — tiempo de vida, parte de la forma del frame. Lo consumen helpers/mocks donde realmente se usa (ver abajo) — el robot físico no usa este campo del cable para decidir cuándo ignorar un frame.
 - **`throttle`/`steering`** — la intención de conducción, -1 a 1.
 - **`armed`** — si los motores están habilitados.
 

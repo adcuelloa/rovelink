@@ -59,7 +59,8 @@ const STATUS = {
     forwarded: 'forwarded',
     accepted: 'accepted',
     rejected: (reason: string) => `rejected: ${REASON_EN[reason] ?? reason}`,
-    safeState: 'safe state (TTL/E-stop)',
+    safeStateWatchdog: 'safe state (link watchdog)',
+    safeStateEstop: 'safe state (emergency stop)',
     linkDown: 'link down — no frame forwarded',
     session: (id: string) => `session ${id}…`,
     gamepad: 'Gamepad',
@@ -70,7 +71,8 @@ const STATUS = {
     forwarded: 'reenviado',
     accepted: 'aceptado',
     rejected: (reason: string) => `rechazado: ${REASON_ES[reason] ?? reason}`,
-    safeState: 'estado seguro (TTL/parada de emergencia)',
+    safeStateWatchdog: 'estado seguro (watchdog de enlace)',
+    safeStateEstop: 'estado seguro (parada de emergencia)',
     linkDown: 'enlace caído — sin frame reenviado',
     session: (id: string) => `sesión ${id}…`,
     gamepad: 'Control',
@@ -195,22 +197,37 @@ export function ControlPipelineLab({ locale, ui }: ControlPipelineLabProps) {
           pulse('ack');
           pulse('rtt');
           return;
-        case 'ttl-stop':
-          // The vehicle just fell back to SAFE_STATE — either the watchdog
-          // noticed silence, or an E-stop fired. Reset every downstream
-          // readout that safe state actually implies (zero motors, no more
-          // frames reaching the simulated device), not just the firmware
-          // label — otherwise the mix/relay panels keep showing whatever
-          // the last accepted frame produced, which contradicts "watch the
-          // robot stop on its own."
+        case 'watchdog-stop':
+          // The link went quiet long enough that the device's own local
+          // watchdog gave up waiting and fell back to SAFE_STATE on its
+          // own — this is the one case where the link itself is actually
+          // down, so relay legitimately reads "link down" here. Reset
+          // every downstream readout safe state implies (zero motors, no
+          // more frames reaching the simulated device), not just the
+          // firmware label — otherwise mix/relay keep showing whatever the
+          // last accepted frame produced, contradicting "watch the robot
+          // stop on its own."
           setStages((s) => ({
             ...s,
-            firmware: t.safeState,
+            firmware: t.safeStateWatchdog,
             mix: { left: 0, right: 0 },
             relay: t.linkDown,
           }));
           pulse('mix');
           pulse('relay');
+          return;
+        case 'emergency-stop':
+          // An E-stop bypasses session/seq/baseline and always reaches the
+          // device the same way a normal frame does — it says nothing
+          // about the link, so relay must NOT be forced to "link down"
+          // here (a healthy connection can carry an E-stop). Only the
+          // motor/firmware readouts reflect the forced safe state.
+          setStages((s) => ({
+            ...s,
+            firmware: t.safeStateEstop,
+            mix: { left: 0, right: 0 },
+          }));
+          pulse('mix');
           return;
         case 'session-changed':
           setStages((s) => ({ ...s, relay: t.session(event.sessionId.slice(0, 8)) }));

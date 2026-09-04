@@ -54,11 +54,11 @@ Every field is required except `controlSessionId`, which is optional on the wire
 
 **`type = 'control'`** — Distinguishes this message from other message types: `telemetry`, `ping`, `pong`, `emergency-stop`, `controller.session`, and others. The relay and firmware switch on `type` to route the message to the right handler.
 
-**`seq`** — A monotonically increasing sequence number. The firmware uses `isNewerFrame()` to reject stale, duplicate, and reordered frames. If the firmware has already processed `seq: 183`, it will reject `seq: 182` even if that frame arrives later. This is the primary defense against network reordering.
+**`seq`** — A monotonically increasing sequence number, scoped to one control session. The firmware uses `isNewerFrame()` to reject any frame whose `seq` isn't strictly greater than the last one it accepted. This guards against a frame being applied twice or an already-superseded frame being applied late — it is not a defense against the network reordering messages in flight; a single healthy WebSocket connection already delivers messages in the order they were sent (see [Message Ordering](/safety/message-ordering/)). The boundary between two different control sessions is `controlSessionId`, not `seq` — see below.
 
-**`sentAt`** — `Date.now()` at send time. The protocol package's `isFrameExpired(frame, now)` helper can use this field for TTL calculation, and it's what the browser-side mock transport and the Learn labs' simulator use. **The real ESP32 firmware does not** — it never reads `sentAt` when applying a frame. See [TTL & Watchdog](/safety/ttl-watchdog/) for what the firmware actually checks instead.
+**`sentAt`** — `Date.now()` at send time. The protocol package's `isFrameExpired(frame, now)` helper can use this field for TTL calculation, and it's what the browser-side mock transport uses. **The real ESP32 firmware does not** — it never reads `sentAt` when applying a frame, and the Learn labs' own simulator deliberately doesn't either, to avoid teaching a check firmware doesn't perform. See [TTL & Watchdog](/safety/ttl-watchdog/) for what the firmware actually checks instead.
 
-**`ttlMs = 500`** — Travels with the frame for the same reason as `sentAt`: it's what `isFrameExpired()` and the Learn simulator use, not what the firmware reads. The firmware has its own separately-defined `TTL_CONTROL_MS` constant (also 500ms) that must be kept in sync by hand — see [TTL & Watchdog](/safety/ttl-watchdog/).
+**`ttlMs = 500`** — Travels with the frame for the same reason as `sentAt`: it's what `isFrameExpired()` consumes where that helper is actually called, not what the firmware reads. The firmware has its own separately-defined `TTL_CONTROL_MS` constant (also 500ms) that must be kept in sync by hand — see [TTL & Watchdog](/safety/ttl-watchdog/).
 
 **`throttle`, `steering`, `gripper`, `armed`** — The actual driving state. These are the values the firmware applies to the motors. The range for `throttle` and `steering` is -1..1, `gripper` is one of `'idle'`, `'open'`, `'close'`, and `armed` is a boolean.
 
@@ -81,27 +81,25 @@ DEVICE receives:
 
 The browser is the authority on _what_ the robot should do. The relay is the authority on _who_ is allowed to command it. Neither can do the other's job. The browser can't mint session IDs because it doesn't know which session the relay considers authoritative. The relay can't invent throttle values because it doesn't know what the operator is commanding. The frame is the handoff point between these two authorities.
 
-## Sequence numbers — why they exist
+## Sequence numbers — what they actually guard against
 
-Network packets don't always arrive in order. Here's a concrete example:
+One healthy WebSocket connection delivers messages in the order they were sent — TCP underneath it guarantees that, and [Message Ordering](/safety/message-ordering/) covers why. So `seq` is not there to un-shuffle packets the network reordered; on a single connection, that never happens.
 
-```
-Packet 181: throttle 0.5  — sent first, arrives third
-Packet 183: throttle 0.8  — sent third, arrives first
-Packet 182: throttle 0.3  — sent second, arrives second
-```
+What `seq` actually guards against is a frame being _applied_ out of its logical order, which is a different problem:
 
-The firmware receives them in the order: 183, 182, 181. Without sequence numbers, it would apply each one in arrival order, ending up at throttle 0.5 — the _first_ command sent, not the _latest_.
+- **A retransmitted or duplicate frame.** If the exact same frame is ever delivered twice, the second copy carries the same `seq`, and `isNewerFrame()` rejects it — the device can't apply the same command twice.
+- **A frame that's already been superseded.** If a newer frame has already been accepted, an older one arriving after it (for whatever reason) is rejected as stale, instead of momentarily un-applying the newer command.
+- **Cross-session leakage — but `seq` isn't the primary guard here.** `controlSessionId`, not `seq`, is what separates one control session from the next. `applyControlFrame()` checks the session first and drops anything that doesn't match the currently active session _before_ `seq` is even consulted. `seq` only has meaning within a single session — a session change resets the ordering state directly (`onSessionChanged()` sets `lastSeq = -1`), it isn't decided by comparing sequence numbers across sessions.
 
-With sequence numbers, the firmware calls `isNewerFrame()` for each:
+Concretely, once the firmware has accepted `seq: 183` within the active session:
 
 ```
-Frame 183: seq 183 > lastSeq 0  → accepted. lastSeq = 183
-Frame 182: seq 182 < lastSeq 183 → rejected (stale)
-Frame 181: seq 181 < lastSeq 183 → rejected (stale)
+Frame 183: seq 183 > lastSeq 0   → accepted. lastSeq = 183
+Frame 182: seq 182 <= lastSeq 183 → rejected (stale)
+Frame 181: seq 181 <= lastSeq 183 → rejected (stale)
 ```
 
-The robot applies throttle 0.8 — the latest command the operator actually sent. The older commands are discarded. This is exactly how `isNewerFrame()` works in the source:
+Within one session, the highest `seq` accepted so far always wins; anything at or below it is rejected. This is exactly how `isNewerFrame()` works in the source:
 
 ```typescript
 export const isNewerFrame = (frame: ControlFrame, lastSeq: number): boolean => frame.seq > lastSeq;
@@ -118,7 +116,7 @@ export const isFrameExpired = (frame: ControlFrame, now: number): boolean =>
   now - frame.sentAt > frame.ttlMs;
 ```
 
-This helper is real and is used — by the browser-side mock transport (`web/src/transport/mock.ts`) and by this Learn site's own control-pipeline simulator. **It is not called anywhere in the ESP32 firmware.** This is a pre-existing gap between the protocol package and the firmware implementation, not something to memorize as device behavior.
+This helper is real and is used — by the browser-side mock transport (`web/src/transport/mock.ts`), which uses it to simulate a dropped/expired frame for local development. **It is not called anywhere in the ESP32 firmware**, and the Learn site's own control-pipeline simulator deliberately does not call it either, specifically to avoid teaching a rejection path real hardware doesn't have — the simulator's frame-application logic mirrors firmware exactly and leaves TTL entirely to its own watchdog (below). The existence of an unused `isFrameExpired()` export is a pre-existing gap between the protocol package and the firmware implementation, not something to memorize as device behavior.
 
 The actual link watchdog that protects the real robot lives entirely on the device and doesn't touch this field at all — it compares its own clock against the last time _any_ valid frame arrived, regardless of what that frame's `sentAt`/`ttlMs` said. The full mechanism, with firmware source, is in [TTL & Watchdog](/safety/ttl-watchdog/) — read that page for what actually happens on hardware.
 
@@ -169,8 +167,8 @@ See how firmware decides whether this frame is still safe → [Safety & Authorit
 ---
 
 <KnowledgeCheck
-  question="If packet 183 arrives before packet 181, what happens?"
-  answer="The firmware's isNewerFrame() accepts 183 because its seq is higher than the last accepted frame. When 181 arrives later, isNewerFrame() rejects it as stale — seq 181 is less than the already-accepted 183. The robot keeps the state from the newer frame."
+  question="If a frame with seq 181 is somehow applied after a frame with seq 183 already was, what happens?"
+  answer="isNewerFrame() rejects it. Once the firmware has accepted seq 183, lastSeq is 183, and 181 <= 183 fails the strict greater-than check — the frame is dropped as stale, regardless of why it showed up late. This isn't a defense against the wire reordering messages (one healthy WebSocket connection already delivers them in order) — it's a defense against ever re-applying an already-superseded command."
 />
 
 ---

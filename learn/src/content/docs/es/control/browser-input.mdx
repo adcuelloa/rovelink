@@ -151,7 +151,7 @@ Ambos métodos de entrada producen las mismas formas normalizadas:
 - **Teclado** → `Axes { throttle, steering }` + `Gripper` + `KeyAction`
 - **Gamepad** → `GamepadInput { throttle, steering, buttons }` (después de evaluar el perfil)
 
-Ambos fluyen a la siguiente capa: **Control de entrada** — que responde la pregunta: "¿Qué pasa si ambos están activos al mismo tiempo?"
+Los valores de teclado y touch ya están en su forma final — van directo a Control de entrada. Los valores de gamepad dan un paso más primero: se mapean a través del **Perfil del controlador** activo, que es donde una lectura analógica cruda como "R2 = 0.72" se convierte en "throttle = 0.72". Teclado y touch no tienen etapa de perfil en absoluto; solo el gamepad la tiene.
 
 ## Ejemplos reales
 
@@ -184,4 +184,4 @@ Ambos fluyen a la siguiente capa: **Control de entrada** — que responde la pre
 
 ## Siguiente
 
-Ahora que tenemos dos tipos de entrada — teclado y gamepad — ¿qué pasa cuando ambos están activos al mismo tiempo? → [Control de entrada](/es/control/input-ownership/)
+Acabas de aprender cómo teclado, touch y gamepad producen cada uno una lectura normalizada `{ throttle, steering }`. La lectura del gamepad todavía no está terminada, sin embargo — aún debe pasar por un **Perfil del controlador** antes de significar lo mismo que ya significan teclado y touch. → [Perfiles del controlador](/es/control/controller-profiles/)

@@ -13,7 +13,7 @@ import { KnowledgeCheck } from '../../../components/shared/KnowledgeCheck.tsx';
 
 ## What if the operator needs the robot to stop NOW?
 
-Normal control has gates: session check, seq check, baseline check, armed check, TTL. Each gate exists for a reason. But what if the operator needs to stop _regardless_ of all of them? What if the session is wrong, the seq is stale, the TTL hasn't expired yet, but the robot is heading toward a wall?
+A normal `ControlFrame` passes through a linear chain: session check, seq check, baseline check, armed/disarmed. Separately — not as another link in that chain — the TTL watchdog and link-loss detector run in parallel and can force safe state on their own timing, independent of any single frame. Each of these exists for a reason. But what if the operator needs to stop _regardless_ of all of them? What if the session is wrong, the seq is stale, the watchdog hasn't tripped yet, but the robot is heading toward a wall?
 
 Emergency stop exists for this.
 
@@ -120,14 +120,14 @@ The `EmergencyStopAck` echoes the triggering message's `sentAt` — not `seq`, b
 
 <KnowledgeCheck
   question="Why is E-stop not equivalent to throttle=0?"
-  answer="throttle=0 is a normal control frame that goes through all gates: session, seq, baseline, armed. If any gate fails, the stop command is rejected. E-stop bypasses every gate — it always works. throttle=0 says 'I want to stop driving.' E-stop says 'stop now, regardless of context.'"
+  answer="throttle=0 is a normal control frame that goes through all gates: session, seq, baseline, armed. If any gate fails, the stop command is rejected. E-stop bypasses every one of those firmware-side gates — once a registered controller's message has actually reached the firmware, it always works. (Getting there still requires clearing the relay's registration/admission gate first — see 'Two gates, not one' above.) throttle=0 says 'I want to stop driving.' E-stop says 'stop now, regardless of context.'"
 />
 
 ---
 
 <KnowledgeCheck
   question="Does E-stop check the control session?"
-  answer="No. E-stop deliberately does not check the control session. The relay forwards it without stamping controlSessionId, and the firmware's onEmergencyStopReceived goes straight to enterSafeState without any session comparison. E-stop must work even if no session has been established."
+  answer="No. E-stop deliberately does not check the control session. The relay forwards it without stamping controlSessionId, and the firmware's onEmergencyStopReceived goes straight to enterSafeState without any session comparison. Once such a message has cleared the relay's registration/admission gate and reached the firmware, it must work even if no session has been established there yet."
 />
 
 ---

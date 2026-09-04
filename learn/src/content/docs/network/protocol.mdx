@@ -92,7 +92,7 @@ Key fields:
 
 - **`seq`** — sequence number. Higher always wins. Old frames with lower `seq` are discarded.
 - **`sentAt`** — the browser's clock when the frame was created.
-- **`ttlMs`** — time-to-live. After this many milliseconds, the robot ignores the frame.
+- **`ttlMs`** — time-to-live, part of the frame shape. Consumed by helpers/mocks where it's actually used (see below) — the physical robot does not use this wire field to decide when to ignore a frame.
 - **`throttle`/`steering`** — the driving intent, -1 to 1.
 - **`armed`** — whether motors are enabled.
 

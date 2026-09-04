@@ -1,8 +1,14 @@
 ---
 /**
- * Compact safety gate position indicator. Shows the safety decision chain
- * a ControlFrame passes through on the firmware, with E-STOP as a
- * separate parallel path (independent of normal sequencing/gating).
+ * Compact safety gate position indicator. The top row is the linear chain a
+ * normal ControlFrame passes through on the firmware (session → seq →
+ * baseline → armed → apply). TTL/watchdog and E-STOP are NOT inline stages
+ * in that chain — applyControlFrame() never checks elapsed time, and the
+ * watchdog/E-stop both force safe state from outside the per-frame path
+ * (watchTtl() runs every loop tick against local millis()/lastFrameMs;
+ * onEmergencyStopReceived() is session/seq/baseline-independent). Both are
+ * shown as a separate parallel row so the widget can't imply either is a
+ * gate a frame passes through.
  */
 interface Props {
   readonly current: string;
@@ -14,12 +20,12 @@ const stages = [
   { id: 'seq', label: 'SEQ', slug: 'safety/message-ordering' },
   { id: 'baseline', label: 'BASELINE', slug: 'safety/safe-baseline' },
   { id: 'armed', label: 'ARMED', slug: 'safety/safe-state' },
-  { id: 'ttl', label: 'TTL', slug: 'safety/ttl-watchdog' },
   { id: 'apply', label: 'APPLY', slug: 'safety/safe-state' },
   { id: 'synthesis', label: 'ALL GATES', slug: 'safety/failure-scenarios' },
 ];
 
 const parallel = [
+  { id: 'ttl', label: 'TTL / WATCHDOG', slug: 'safety/ttl-watchdog' },
   { id: 'estop', label: 'E-STOP', slug: 'safety/emergency-stop' },
 ];
 

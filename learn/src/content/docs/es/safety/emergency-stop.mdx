@@ -13,7 +13,7 @@ import { KnowledgeCheck } from '../../../../components/shared/KnowledgeCheck.tsx
 
 ## ¿Qué pasa si el operador necesita que el robot se detenga AHORA?
 
-El control normal tiene compuertas: verificación de sesión, verificación de seq, verificación de línea base, verificación de armed, TTL. Cada compuerta existe por una razón. Pero ¿qué pasa si el operador necesita detenerse _sin importar_ todas ellas? ¿Qué pasa si la sesión es incorrecta, el seq está obsoleto, el TTL no ha expirado aún, pero el robot se dirige hacia una pared?
+Un `ControlFrame` normal pasa por una cadena lineal: verificación de sesión, verificación de seq, verificación de línea base, armed/disarmed. Por separado — no como otro eslabón de esa cadena — el watchdog de TTL y el detector de pérdida de enlace corren en paralelo y pueden forzar el estado seguro por su propia cuenta, sin depender de ningún frame en particular. Cada uno de estos existe por una razón. Pero ¿qué pasa si el operador necesita detenerse _sin importar_ todos ellos? ¿Qué pasa si la sesión es incorrecta, el seq está obsoleto, el watchdog no se ha disparado aún, pero el robot se dirige hacia una pared?
 
 La parada de emergencia existe para esto.
 
@@ -120,14 +120,14 @@ El `EmergencyStopAck` repite el `sentAt` del mensaje que lo desencadenó — no 
 
 <KnowledgeCheck
   question="¿Por qué la parada de emergencia no es equivalente a throttle=0?"
-  answer="throttle=0 es un frame de control normal que pasa por todas las compuertas: sesión, seq, línea base, armed. Si cualquier compuerta falla, el comando de parada se rechaza. La parada de emergencia evita cada compuerta — siempre funciona. throttle=0 dice 'quiero dejar de conducir.' La parada de emergencia dice 'detente ahora, sin importar el contexto.'"
+  answer="throttle=0 es un frame de control normal que pasa por todas las compuertas: sesión, seq, línea base, armed. Si cualquier compuerta falla, el comando de parada se rechaza. La parada de emergencia evita cada una de esas compuertas del lado del firmware — una vez que el mensaje de un controlador registrado realmente llegó al firmware, siempre funciona. (Llegar hasta ahí todavía requiere pasar primero la compuerta de registro/admisión del relay — ver 'Dos compuertas, no una' arriba.) throttle=0 dice 'quiero dejar de conducir.' La parada de emergencia dice 'detente ahora, sin importar el contexto.'"
 />
 
 ---
 
 <KnowledgeCheck
   question="¿La parada de emergencia verifica la sesión de control?"
-  answer="No. La parada de emergencia deliberadamente no verifica la sesión de control. El relay la reenvía sin estampar controlSessionId, y onEmergencyStopReceived del firmware va directo a enterSafeState sin ninguna comparación de sesión. La parada de emergencia debe funcionar incluso si no se ha establecido ninguna sesión."
+  answer="No. La parada de emergencia deliberadamente no verifica la sesión de control. El relay la reenvía sin estampar controlSessionId, y onEmergencyStopReceived del firmware va directo a enterSafeState sin ninguna comparación de sesión. Una vez que ese mensaje pasó la compuerta de registro/admisión del relay y llegó al firmware, debe funcionar incluso si todavía no se ha establecido ninguna sesión ahí."
 />
 
 ---

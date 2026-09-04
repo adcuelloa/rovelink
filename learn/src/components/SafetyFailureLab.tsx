@@ -53,7 +53,10 @@ const STRINGS = {
     reasonRejectSeq: 'stale-seq',
     reasonRejectBaseline: 'armed-before-baseline',
     reasonRejectTtl: 'ttl-expired',
-    reasonSafeStop: 'Emergency stop / session change',
+    reasonSafeStop: 'Bypasses session/seq/baseline gating — device forced to safe state',
+    reasonSessionEstablished: 'Session established — baseline still required before arming',
+    reasonBaselineEstablished: 'Baseline established — armed frames now accepted',
+    reasonWatchdogOk: 'Watchdog check — still within the TTL window',
     noSession: 'No active session',
     seq: 'Seq',
     lastSession: 'Session',
@@ -91,7 +94,10 @@ const STRINGS = {
     reasonRejectSeq: 'stale-seq',
     reasonRejectBaseline: 'armed-before-baseline',
     reasonRejectTtl: 'ttl-expired',
-    reasonSafeStop: 'Parada de emergencia / cambio de sesión',
+    reasonSafeStop: 'Omite sesión/seq/línea base — el dispositivo se fuerza a estado seguro',
+    reasonSessionEstablished: 'Sesión establecida — aún se requiere línea base antes de armar',
+    reasonBaselineEstablished: 'Línea base establecida — ahora se aceptan frames armados',
+    reasonWatchdogOk: 'Verificación del watchdog — aún dentro de la ventana TTL',
     noSession: 'Sin sesión activa',
     seq: 'Seq',
     lastSession: 'Sesión',
@@ -145,7 +151,6 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
   const firmwareRef = useRef(new SimulatedFirmware());
   const sessionIdRef = useRef('');
   const seqRef = useRef(0);
-  const baselineSentRef = useRef(false);
 
   const [log, setLog] = useState<readonly LogEntry[]>([]);
   const [gates, setGates] = useState<readonly SafetyGate[]>([]);
@@ -163,10 +168,9 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
   function newSession(): void {
     sessionIdRef.current = relayRef.current.mintSession();
     firmwareRef.current.onSessionChanged(sessionIdRef.current);
-    baselineSentRef.current = false;
     seqRef.current = 0;
     setCurrentSession(sessionIdRef.current.slice(0, 8));
-    setIsBaselineReady(false);
+    setIsBaselineReady(firmwareRef.current.sessionReady);
     setIsArmed(false);
     setCurrentSeq(0);
     setGates(['CONNECTED', 'REGISTERED', 'CURRENT SESSION']);
@@ -183,29 +187,37 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
     const outcome = firmwareRef.current.applyFrame(finalFrame, now);
     const decision = resolveDecision(outcome);
 
-    if (outcome.accepted && !state.armed) {
-      baselineSentRef.current = true;
-    }
-
+    // Derive baseline-readiness from the simulation model itself
+    // (SimulatedFirmware#sessionReady, which applyFrame() already updated
+    // above) rather than shadowing it in a separate React ref that could
+    // drift from what the model actually did.
+    const baselineReady = firmwareRef.current.sessionReady;
     const armedState = outcome.accepted ? state.armed : isArmed;
-    const resolvedGates = resolveGates(outcome, baselineSentRef.current, armedState);
+    const resolvedGates = resolveGates(outcome, baselineReady, armedState);
 
     setGates(resolvedGates);
     setCurrentSeq(seq);
-    setIsBaselineReady(baselineSentRef.current);
+    setIsBaselineReady(baselineReady);
     setIsArmed(armedState);
 
     let reason: string | undefined;
-    if (!outcome.accepted) {
-      if (decision === 'SAFE STOP') {
-        reason = t.reasonSafeStop;
-      } else if (outcome.reason === 'wrong-session') {
-        reason = t.reasonReject;
-      } else if (outcome.reason === 'stale-seq') {
-        reason = t.reasonRejectSeq;
-      } else if (outcome.reason === 'armed-before-baseline') {
-        reason = t.reasonRejectBaseline;
+    if (outcome.accepted) {
+      // Name the actual mechanism reached, not a generic "accepted" — a
+      // disarmed frame that first establishes the baseline is a different
+      // event than a fully-armed frame passing every gate.
+      if (resolvedGates.includes('FRESH CONTROL')) {
+        reason = t.reasonAccept;
+      } else if (!state.armed) {
+        reason = t.reasonBaselineEstablished;
       }
+    } else if (outcome.reason === 'wrong-session') {
+      reason = t.reasonReject;
+    } else if (outcome.reason === 'stale-seq') {
+      reason = t.reasonRejectSeq;
+    } else if (outcome.reason === 'armed-before-baseline') {
+      // This is a baseline-gate rejection, NOT an emergency stop or a
+      // session change — it must never share reasonSafeStop's text.
+      reason = t.reasonRejectBaseline;
     }
 
     pushLog({
@@ -223,7 +235,7 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
     pushLog({
       label: t.newSession,
       decision: 'ACCEPT',
-      reason: t.reasonAccept,
+      reason: t.reasonSessionEstablished,
       gates: ['CONNECTED', 'REGISTERED', 'CURRENT SESSION'],
     });
   }
@@ -257,7 +269,7 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
     pushLog({
       label: t.dropNetwork,
       decision: tripped ? 'SAFE STOP' : 'ACCEPT',
-      reason: tripped ? t.reasonRejectTtl : t.reasonAccept,
+      reason: tripped ? t.reasonRejectTtl : t.reasonWatchdogOk,
       gates,
     });
   }
@@ -332,27 +344,35 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
   }
 
   function handleEmergencyStop(): void {
+    // Mirrors onEmergencyStopReceived() -> enterSafeState(): forces SAFE_STATE
+    // (control becomes safe, armed becomes false) but never touches
+    // sessionReady — only onSessionChanged() may reset the baseline. So a
+    // session that was already baselined stays baselined straight through
+    // an E-stop; only a session change/reconnect re-arms that gate.
     firmwareRef.current.emergencyStop();
+    const baselineReady = firmwareRef.current.sessionReady;
+    const nextGates: SafetyGate[] = ['CONNECTED', 'REGISTERED', 'CURRENT SESSION'];
+    if (baselineReady) nextGates.push('BASELINE READY');
+
     setIsArmed(false);
-    setIsBaselineReady(false);
-    setGates(['CONNECTED', 'REGISTERED', 'CURRENT SESSION']);
+    setIsBaselineReady(baselineReady);
+    setGates(nextGates);
 
     pushLog({
       label: t.emergencyStop,
       decision: 'SAFE STOP',
       reason: t.reasonSafeStop,
-      gates: ['CONNECTED', 'REGISTERED', 'CURRENT SESSION'],
+      gates: nextGates,
     });
   }
 
   function handleReconnectController(): void {
     const newSid = relayRef.current.mintSession();
     firmwareRef.current.onSessionChanged(newSid);
-    baselineSentRef.current = false;
     seqRef.current = 0;
     sessionIdRef.current = newSid;
     setCurrentSession(newSid.slice(0, 8));
-    setIsBaselineReady(false);
+    setIsBaselineReady(firmwareRef.current.sessionReady);
     setIsArmed(false);
     setCurrentSeq(0);
     setGates(['CONNECTED', 'REGISTERED', 'CURRENT SESSION']);
@@ -360,7 +380,7 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
     pushLog({
       label: t.reconnectController,
       decision: 'ACCEPT',
-      reason: t.reasonAccept,
+      reason: t.reasonSessionEstablished,
       gates: ['CONNECTED', 'REGISTERED', 'CURRENT SESSION'],
       session: newSid.slice(0, 8),
     });
@@ -371,7 +391,6 @@ export function SafetyFailureLab({ locale }: SafetyFailureLabProps) {
     firmwareRef.current = new SimulatedFirmware();
     sessionIdRef.current = '';
     seqRef.current = 0;
-    baselineSentRef.current = false;
     setLog([]);
     setGates([]);
     setCurrentSeq(0);

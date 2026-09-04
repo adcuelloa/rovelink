@@ -106,7 +106,7 @@ Si el enlace se cae mientras está armado, el robot se detiene inmediatamente �
 
 ## El compromiso
 
-Un tiempo de espera más corto (digamos 100ms) fallaría de forma más segura más rápido, pero también se activaría con jitter ordinario. Un tiempo de espera más largo (digamos 2000ms) sería más tolerante con conexiones deficientes, pero el robot seguiría conduciendo durante 2 segundos después de que el controlador desaparezca. El valor de 500ms equilibra estas preocupaciones para redes domésticas/de oficina típicas.
+Un tiempo de espera más corto (digamos 100ms) fallaría de forma más segura más rápido, pero arriesga activarse con jitter transitorio. Un tiempo de espera más largo (digamos 2000ms) sería más tolerante con interrupciones transitorias, pero el robot seguiría conduciendo hasta 2 segundos después de que el controlador realmente desaparezca. 500ms es el valor con el que RoveLink se distribuye — el número específico es un punto de compromiso configurado entre estos dos modos de falla, no una cifra derivada de datos de red medidos.
 
 ---
 
@@ -119,7 +119,7 @@ Un tiempo de espera más corto (digamos 100ms) fallaría de forma más segura m�
 
 <KnowledgeCheck
   question="¿Por qué heartbeatMs está configurado en 150ms en lugar de 50ms?"
-  answer="La tasa de heartbeat está restringida por el margen forzado por test: heartbeatMs * 2 <= CONTROL_TTL_MS. A 150ms, dos ciclos de heartbeat (300ms) dejan 200ms de margen de tolerancia dentro del TTL de 500ms. Un heartbeat más rápido (50ms) desperdiciaría ancho de banda en conexiones normales sin ningún beneficio de seguridad significativo — el margen de 200ms ya es suficiente para el jitter típico de Internet/Wi-Fi."
+  answer="La tasa de heartbeat está restringida por el margen forzado por test: heartbeatMs * 2 <= CONTROL_TTL_MS. A 150ms, dos ciclos de heartbeat (300ms) dejan 200ms de margen dentro del TTL de 500ms. Un heartbeat más rápido (50ms) enviaría más tráfico por un margen más amplio que el test no exige — 150ms es el valor que el código actualmente usa y refuerza mediante esa aserción."
 />
 
 ---

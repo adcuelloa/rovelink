@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { CONTROL_TTL_MS } from '@rovelink/protocol';
 import { ControlEngine } from '@rovelink/web/src/control/engine.ts';
 import { ControlSender } from '@rovelink/web/src/transport/sender.ts';
 import type { TransportEvent } from '@rovelink/web/src/transport/types.ts';
@@ -55,5 +56,52 @@ test('cutting the connection drops in-flight frames instead of delivering them',
   await new Promise((resolve) => setTimeout(resolve, 20));
   const acceptedCount = pipeline.filter((s) => s === 'firmware-accepted').length;
   assert.equal(acceptedCount, 1, 'only the frame sent before the cut should have been delivered');
+  transport.disconnect();
+});
+
+test('link silence trips the local watchdog and reports it as watchdog-stop, never emergency-stop', async () => {
+  const clock = withClock();
+  const transport = new SimulatedTransport('robot-01', { latencyMs: 0 }, clock.now);
+  const pipeline: string[] = [];
+  transport.subscribePipeline((e) => pipeline.push(e.stage));
+  await transport.connect();
+
+  transport.sendControl({ throttle: 0, steering: 0, gripper: 'idle', armed: false }); // baseline
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  transport.sendControl({ throttle: 0.5, steering: 0, gripper: 'idle', armed: true }); // arm
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  // Simulate silence past CONTROL_TTL_MS purely via the injected clock, then
+  // give the transport's real 50ms watchdog poll a chance to observe it.
+  clock.advance(CONTROL_TTL_MS + 50);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.ok(
+    pipeline.includes('watchdog-stop'),
+    'expected a watchdog-stop event once silence exceeds CONTROL_TTL_MS while armed',
+  );
+  assert.ok(
+    !pipeline.includes('emergency-stop'),
+    'a watchdog trip must never be reported as an emergency-stop',
+  );
+  transport.disconnect();
+});
+
+test('emergencyStop() reports emergency-stop, never watchdog-stop, on a healthy link', async () => {
+  const clock = withClock();
+  const transport = new SimulatedTransport('robot-01', { latencyMs: 0 }, clock.now);
+  const pipeline: string[] = [];
+  transport.subscribePipeline((e) => pipeline.push(e.stage));
+  await transport.connect();
+  transport.sendControl({ throttle: 0, steering: 0, gripper: 'idle', armed: false });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  transport.emergencyStop();
+
+  assert.ok(pipeline.includes('emergency-stop'), 'expected an emergency-stop event');
+  assert.ok(
+    !pipeline.includes('watchdog-stop'),
+    'an explicit E-stop over a healthy link must never be reported as a watchdog trip',
+  );
   transport.disconnect();
 });

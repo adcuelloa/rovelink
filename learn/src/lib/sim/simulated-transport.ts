@@ -31,7 +31,8 @@ export type PipelineStage =
       readonly at: number;
     }
   | { readonly stage: 'ack'; readonly seq: number; readonly rttMs: number; readonly at: number }
-  | { readonly stage: 'ttl-stop'; readonly at: number }
+  | { readonly stage: 'watchdog-stop'; readonly at: number }
+  | { readonly stage: 'emergency-stop'; readonly at: number }
   | { readonly stage: 'session-changed'; readonly sessionId: string; readonly at: number };
 
 export type PipelineListener = (event: PipelineStage) => void;
@@ -150,10 +151,15 @@ export class SimulatedTransport implements RobotTransport {
     setTimeout(() => this.#deliver(frame), this.#latencyMs);
   }
 
+  /** E-stop bypasses session/seq/baseline entirely, same as
+   * onEmergencyStopReceived() — but unlike a watchdog trip, it says nothing
+   * about the link: a healthy connection can carry an E-stop just as well as
+   * a failing one, so this must never be reported through the same event as
+   * #checkTtl()'s link-silence trip (see 'watchdog-stop' below). */
   emergencyStop(): void {
     this.#firmware.emergencyStop();
     const at = this.#now();
-    this.#pipeline.forEach((l) => l({ stage: 'ttl-stop', at }));
+    this.#pipeline.forEach((l) => l({ stage: 'emergency-stop', at }));
     this.#emitter.emit({ kind: 'estop-rtt', ms: Math.round(this.#latencyMs * 2) });
   }
 
@@ -195,10 +201,14 @@ export class SimulatedTransport implements RobotTransport {
     }
   }
 
+  /** Link-silence trip, distinct from emergencyStop() above: this is the
+   * ONLY path that means the vehicle actually stopped hearing from the
+   * controller, so it's the only one allowed to report the link itself as
+   * down. */
   #checkTtl(): void {
     const at = this.#now();
     if (this.#firmware.checkTtl(at)) {
-      this.#pipeline.forEach((l) => l({ stage: 'ttl-stop', at }));
+      this.#pipeline.forEach((l) => l({ stage: 'watchdog-stop', at }));
       this.#emitter.emit({
         kind: 'alert',
         level: 'error',

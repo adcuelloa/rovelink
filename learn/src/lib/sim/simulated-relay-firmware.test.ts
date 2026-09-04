@@ -138,6 +138,36 @@ test('emergency stop is unconditional, independent of session or sequence', () =
   assert.deepEqual(firmware.state, SAFE_STATE);
 });
 
+test('emergency stop forces safe state but never resets an already-established baseline', () => {
+  // Mirrors enterSafeState()/onEmergencyStopReceived(): both force SAFE_STATE
+  // but neither touches sessionReady — only onSessionChanged() may reset the
+  // baseline. So a session that already sent its disarmed baseline stays
+  // "ready" straight through an E-stop, and a later armed frame in that same
+  // session is accepted without needing a new baseline first.
+  const relay = new SimulatedRelay();
+  const firmware = new SimulatedFirmware();
+  const sessionId = relay.mintSession();
+  firmware.onSessionChanged(sessionId);
+  firmware.applyFrame(relay.stamp(createControlFrame(DISARMED, 1, 0)), 0);
+  assert.equal(firmware.sessionReady, true);
+
+  firmware.emergencyStop();
+  assert.deepEqual(firmware.state, SAFE_STATE);
+  assert.equal(
+    firmware.sessionReady,
+    true,
+    'an emergency stop must not un-baseline the current session',
+  );
+
+  const armedAfterEstop = relay.stamp(createControlFrame(DRIVING, 2, 20));
+  const outcome = firmware.applyFrame(armedAfterEstop, 20);
+  assert.equal(
+    outcome.accepted,
+    true,
+    'an armed frame in the same session is accepted after E-stop without re-baselining',
+  );
+});
+
 test('differential mix on an accepted frame matches @rovelink/protocol exactly', () => {
   const relay = new SimulatedRelay();
   const firmware = new SimulatedFirmware();
