@@ -114,4 +114,9 @@ void hwLinkLed(bool on)
   digitalWrite(LED_LINK_PIN, on ? HIGH : LOW);
 }
 
+void hwBeep(unsigned int frequencyHz, unsigned int durationMs)
+{
+  tone(BUZZER_PIN, frequencyHz, durationMs);
+}
+
 #endif // !HARDWARE_SIMULATION

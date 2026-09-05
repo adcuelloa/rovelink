@@ -29,6 +29,7 @@ RobotHardware
 | Gripper servo                       | Done (HARDWARE_SIMULATION 0) |
 | Telemetry (RSSI, ackSeq)            | Done                         |
 | Reconnection with backoff           | Done                         |
+| Link LED + beep feedback            | Done (HARDWARE_SIMULATION 0) |
 
 **Not yet validated**: physical ESP32 hardware + deployed Worker.
 

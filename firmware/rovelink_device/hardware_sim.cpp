@@ -77,4 +77,13 @@ void hwLinkLed(bool on)
   Serial.println(on ? "on" : "off");
 }
 
+void hwBeep(unsigned int frequencyHz, unsigned int durationMs)
+{
+  Serial.print("[BUZZER SIM] freq=");
+  Serial.print(frequencyHz);
+  Serial.print(" duration=");
+  Serial.print(durationMs);
+  Serial.println("ms");
+}
+
 #endif // HARDWARE_SIMULATION

@@ -58,12 +58,18 @@ typedef void (*TransportEmergencyCb)(int64_t sentAt);
 // change which control session is currently active on this device. See
 // protocol.ts ControlSession and room.ts #sendControlSession.
 typedef void (*TransportSessionCb)(const char *sessionId);
+// Fires exactly when transportConnected() flips: true once WSS is open AND
+// device.register has been sent on this connection, false on disconnect.
+// For UI/feedback only (LED, beep) — never a gate for control logic, which
+// already has its own link handling via watchWssLink()/linkAlive.
+typedef void (*TransportLinkCb)(bool connected);
 
 // Register callbacks before transportSetup(). No queue: each call delivers
 // the latest decoded frame, never an old one.
 void transportOnControl(TransportControlCb cb);
 void transportOnEmergencyStop(TransportEmergencyCb cb);
 void transportOnSessionChange(TransportSessionCb cb);
+void transportOnLinkChange(TransportLinkCb cb);
 
 // Prepare the WSS client. Doesn't connect yet: transportLoop() only connects
 // when networkOnline() is true.

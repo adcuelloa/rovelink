@@ -39,3 +39,7 @@ void hwApplyGripper(char gripper);
 
 // Link status LED.
 void hwLinkLed(bool on);
+
+// Short buzzer tone. Non-blocking: RealHardware uses tone()'s own hardware
+// timer to auto-stop after durationMs, so callers never wait on this.
+void hwBeep(unsigned int frequencyHz, unsigned int durationMs);

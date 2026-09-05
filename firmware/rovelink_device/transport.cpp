@@ -42,6 +42,7 @@ static WebSocketsClient wsClient;
 static TransportControlCb cbControl = nullptr;
 static TransportEmergencyCb cbEmergencyStop = nullptr;
 static TransportSessionCb cbSessionChange = nullptr;
+static TransportLinkCb cbLinkChange = nullptr;
 
 static bool wsStarted = false;     // begin()/beginSslWithCA() already called this network session
 static bool connected = false;     // WStype_CONNECTED seen this session
@@ -90,6 +91,8 @@ static void sendRegistration()
 
   registered = true;
   Serial.println("[WSS] registered");
+  if (cbLinkChange != nullptr)
+    cbLinkChange(true);
 }
 
 static void onConnect()
@@ -213,6 +216,8 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
     // cleared `connected`, so a `connected && !connectedNow` check there
     // never fires and backoff never escalates (confirmed: 240s of live
     // capture at a flat ~2s retry cadence after an abrupt device reboot).
+    if (cbLinkChange != nullptr)
+      cbLinkChange(false);
     scheduleRetry();
     break;
 
@@ -276,6 +281,11 @@ void transportOnEmergencyStop(TransportEmergencyCb cb)
 void transportOnSessionChange(TransportSessionCb cb)
 {
   cbSessionChange = cb;
+}
+
+void transportOnLinkChange(TransportLinkCb cb)
+{
+  cbLinkChange = cb;
 }
 
 void transportSetup()

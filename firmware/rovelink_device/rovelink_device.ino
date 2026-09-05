@@ -62,6 +62,16 @@ char activeSession[CONTROL_SESSION_ID_LEN] = "";
 // UI happened to say a moment before the session changed.
 bool sessionReady = false;
 
+// --- Link indicator (LED + beep) ---
+//
+// Purely for human feedback (LED, buzzer): never a gate for control logic,
+// which already has its own link handling via watchWssLink()/linkAlive.
+// Single owner of hwLinkLed() — see updateLinkIndicator().
+bool linkConnected = false;
+bool linkBlinkOn = false;
+unsigned long lastLinkBlinkMs = 0;
+const unsigned long LINK_BLINK_INTERVAL_MS = 400;
+
 float clampAxis(float v)
 {
   if (isnan(v))
@@ -88,7 +98,44 @@ void enterSafeState(const char *reason)
 
   currentState = SAFE_STATE;
   hwStopMotors();
-  hwLinkLed(false);
+  // LED is not touched here: updateLinkIndicator() derives it from
+  // linkConnected + currentState.armed every loop, so it correctly keeps
+  // blinking (still connected, just disarmed) instead of going dark.
+}
+
+// LED has a single owner: off = no link, blinking = connected but not armed,
+// solid = armed and driving. Called every loop(); a same-value hwLinkLed()
+// call is harmless (SimulatedHardware already dedupes, RealHardware is just
+// a digitalWrite).
+void updateLinkIndicator()
+{
+  if (!linkConnected)
+  {
+    hwLinkLed(false);
+    return;
+  }
+  if (currentState.armed)
+  {
+    hwLinkLed(true);
+    return;
+  }
+  if (millis() - lastLinkBlinkMs >= LINK_BLINK_INTERVAL_MS)
+  {
+    lastLinkBlinkMs = millis();
+    linkBlinkOn = !linkBlinkOn;
+  }
+  hwLinkLed(linkBlinkOn);
+}
+
+// Fired by transport.cpp exactly when transportConnected() flips. Feedback
+// only (LED state above, beep here) — never gates control logic.
+void onLinkChanged(bool isConnected)
+{
+  linkConnected = isConnected;
+  if (isConnected)
+    hwBeep(2000, 120);
+  else
+    hwBeep(400, 250);
 }
 
 // The ONLY function allowed to change activeSession — driven exclusively by
@@ -177,7 +224,8 @@ void applyControlFrame(long seq, unsigned long sentAt, unsigned long ttlMs,
 
   applyMotors(currentState.throttle, currentState.steering);
   hwApplyGripper(currentState.gripper);
-  hwLinkLed(true);
+  // LED is not touched here: updateLinkIndicator() derives it from
+  // linkConnected + currentState.armed every loop.
   // Sent only here, after MOTOR SIM/control-state application above — never
   // for a frame that returned early (wrong session, stale/duplicate seq, or
   // armed=true rejected before the session's disarmed baseline).
@@ -425,6 +473,7 @@ void setup()
   transportOnControl(onControlReceived);
   transportOnEmergencyStop(onEmergencyStopReceived);
   transportOnSessionChange(onSessionChanged);
+  transportOnLinkChange(onLinkChanged);
   transportSetup();
 }
 
@@ -459,6 +508,7 @@ void loop()
     enterSafeState("link-lost");
 
   watchTtl();
+  updateLinkIndicator();
 
   // Without this, the loop spins without yielding CPU and the IDLE task
   // can't feed the task watchdog: this is the other half of TG1WDT_SYS_RST.
