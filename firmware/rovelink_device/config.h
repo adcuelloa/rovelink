@@ -13,7 +13,7 @@
 // test board starts stably, because the car's inherited pinout (GPIO 25/26/27)
 // is wired to the S3's octal Flash/PSRAM bus and configuring it as output
 // causes the boot-loop `rst:0x8 (TG1WDT_SYS_RST)`.
-#define HARDWARE_SIMULATION 1
+#define HARDWARE_SIMULATION 0
 
 #define ROBOT_ID "robot-01"
 #define SERIAL_BAUD 115200
