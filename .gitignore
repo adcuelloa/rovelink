@@ -13,3 +13,6 @@ firmware/rovelink_device/wifi_secrets.h
 firmware/rovelink_device/device_secrets.h
 firmware/rovelink_camera/wifi_secrets.h
 firmware/rovelink_camera/video_secrets.h
+artifacts/
+firmware/*/build/
+firmware/rovelink_device.zip

@@ -19,3 +19,9 @@ bool cameraNetworkConnected();
 
 // "down" | "connecting" | "connected", for the periodic [STATS] line.
 const char *cameraNetworkStatusText();
+
+// Current AP signal strength in dBm, or 0 when not associated. Reported in
+// the periodic [STATS] line: a weak RSSI (worse than roughly -75 dBm) is
+// the single most common cause of a video stream that connects but then
+// stalls or drops, and it is invisible without printing it.
+int cameraNetworkRssi();

@@ -38,7 +38,20 @@ bool cameraCaptureSetup()
   config.xclk_freq_hz = CAM_XCLK_FREQ_HZ;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  if (psramFound())
+  // PSRAM decides the whole capture profile below, so it is reported
+  // BEFORE init: if this says false on a board that should have it, that is
+  // the finding, and VGA was never attempted.
+  const bool psram = psramFound();
+  Serial.print("[PSRAM] found=");
+  Serial.print(psram ? "true" : "false");
+  Serial.print(" size=");
+  Serial.print(ESP.getPsramSize());
+  Serial.print(" free=");
+  Serial.println(ESP.getFreePsram());
+  if (!psram)
+    Serial.println("[PSRAM] WARNING: no PSRAM — falling back to QQVGA/160x120");
+
+  if (psram)
   {
     config.frame_size = CAM_PSRAM_FRAMESIZE;
     config.jpeg_quality = CAM_PSRAM_JPEG_QUALITY;
@@ -61,11 +74,22 @@ bool cameraCaptureSetup()
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   }
 
+  Serial.print("[CAM] profile=");
+  Serial.print(psram ? "psram" : "no-psram");
+  Serial.print(" quality=");
+  Serial.print(config.jpeg_quality);
+  Serial.print(" fb_count=");
+  Serial.print(config.fb_count);
+  Serial.print(" xclk=");
+  Serial.print(config.xclk_freq_hz / 1000000);
+  Serial.println("MHz");
+
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK)
   {
     Serial.print("[CAM] esp_camera_init failed: 0x");
     Serial.println(err, HEX);
+    Serial.println("[CAM] check: ribbon cable seated, 5V supply, board is AI-Thinker");
     return false;
   }
 
@@ -76,6 +100,8 @@ bool cameraCaptureSetup()
   {
     s->set_vflip(s, CAM_VFLIP);
     s->set_hmirror(s, CAM_HMIRROR);
+    Serial.print("[CAM] sensor PID=0x");
+    Serial.println(s->id.PID, HEX);
   }
   return true;
 }

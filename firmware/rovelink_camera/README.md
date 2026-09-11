@@ -125,36 +125,57 @@ strategy.
 
 ## GPIO25 / Wemos Camera Power
 
-The original car's Wemos used GPIO25 as a simple power-enable line for
-this camera board (not a signal into the camera itself — see
-`firmware/rovelink_device/hardware_real.cpp`'s `hwCameraPower()`, added in
-a prior pass, still uncalled from any control-protocol command). **This
-firmware makes no assumption about how it is powered.** No current
-RoveLink control message exists to switch camera power on/off, and none
-was added here (per that pass's scope). **The physical test today requires
-manually powering the ESP32-CAM** (its own supply, or a bench supply) —
-there is no way to trigger `hwCameraPower()` from the browser yet.
+The original car's Wemos used GPIO25 as a power-enable line for a separate
+camera board (not a signal into the camera itself). **There is no
+`hwCameraPower()` in the car firmware** — an earlier draft added one and it
+was reverted to avoid changing a pin's behaviour on hardware that is
+known-good at `f5d3306` and cannot be re-validated before the demo (see
+`firmware/README.md`). Note also that on the ESP32-CAM itself GPIO25 is
+**VSYNC**, a different signal on a different chip.
 
-## BLOCKER: video-relay is not deployed
+**This firmware makes no assumption about how the camera is powered, and the
+first streaming test requires the ESP32-CAM to be powered independently**
+(its own supply, or a bench supply). GPIO25 is tracked as its own physical
+experiment, to be run after the camera demo works.
 
-Verified with `wrangler deployments list` under both Cloudflare accounts
-this repo has access to: **`rovelink-video-relay` does not exist on either
-account** (`This Worker does not exist on your account` — error 10007).
-`web/.env.local`'s own `VITE_VIDEO_RELAY_URL` already points at
-`ws://localhost:8788`, consistent with this. `VIDEO_RELAY_PROFILE` in
-`video_relay_config.h` therefore defaults to `VIDEO_RELAY_PROFILE_LOCAL`
-— today's first live test can only reach a video relay running locally
-(`pnpm --filter @rovelink/video-relay dev`) on the same LAN as the camera.
-Switching to `VIDEO_RELAY_PROFILE_CLOUDFLARE` requires, at minimum:
+## Video relay: DEPLOYED (resolved 2026-09-10)
+
+This section previously recorded a blocker — `rovelink-video-relay` did not
+exist on either Cloudflare account. **That is resolved.** The Worker is
+deployed and healthy:
+
+| | |
+|---|---|
+| Video relay | `wss://rovelink-video-relay.cuello.workers.dev` |
+| Control relay | `wss://rovelink-relay.cuello.dev` |
+| Account | `Andrés Cuello account` (`8ddbff42…`) |
+
+`VIDEO_RELAY_PROFILE` in `video_relay_config.h` is therefore now
+`VIDEO_RELAY_PROFILE_CLOUDFLARE` (port 443, TLS on) — the production
+transport, reachable from any network with Internet access rather than only
+from a LAN shared with a laptop running `wrangler dev`.
+
+Both Worker secrets are set, and `VIDEO_TICKET_SECRET` is byte-for-byte
+identical on the two relays. That was not assumed — it was proved end to end
+against the deployed infrastructure: the control relay minted a viewer
+ticket, the video relay accepted it, and 698 frames flowed from the
+simulated publisher with `dup=0 ooo=0` at ~200 ms latency. See
+`docs/hardware-demo-runbook.md` §2 to repeat that test at any time.
+
+**TLS trust:** this host's chain is
+`leaf CN=cuello.workers.dev -> GTS WE1 -> GTS Root R4`, and GTS Root R4 is
+already one of the three roots in `cloudflare_ca_certs.h` — the same chain
+the already-validated control relay uses. No new trust material was needed,
+and there is no insecure fallback in this firmware.
+
+A **first** deploy of a Worker cannot use `wrangler secret put` (the Worker
+does not exist yet, so there is nothing to attach a secret to). It needs:
 
 ```bash
-pnpm --filter @rovelink/video-relay deploy
-npx wrangler secret put VIDEO_PUBLISHER_SECRET   # from video-relay/
-npx wrangler secret put VIDEO_TICKET_SECRET      # MUST match relay/'s own value exactly
+npx wrangler deploy --secrets-file <file>   # NAME=value lines
 ```
 
-The control relay (`rovelink-relay`) already has `VIDEO_TICKET_SECRET`
-configured — only the video relay side is missing.
+Subsequent deploys preserve the existing secrets.
 
 ## Required Libraries
 

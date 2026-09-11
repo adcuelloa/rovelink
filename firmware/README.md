@@ -30,8 +30,46 @@ RobotHardware
 | Telemetry (RSSI, ackSeq)            | Done                         |
 | Reconnection with backoff           | Done                         |
 | Link LED + beep feedback            | Done (HARDWARE_SIMULATION 0) |
+| Camera power line (GPIO25)          | **Not implemented — deliberately** |
 
 **Not yet validated**: physical ESP32 hardware + deployed Worker.
+
+## Firmware targets
+
+| Directory | Board | FQBN | Purpose |
+|---|---|---|---|
+| `rovelink_device/` | Wemos D1 R32 | `esp32:esp32:esp32` | The car. Physically validated at commit `f5d3306`. |
+| `rovelink_camera_smoketest/` | AI-Thinker ESP32-CAM | `esp32:esp32:esp32cam` | Camera hardware only — no Wi-Fi, no TLS, no protocol, no secrets. |
+| `rovelink_camera/` | AI-Thinker ESP32-CAM | `esp32:esp32:esp32cam` | Full RoveLink video publisher over WSS/TLS. |
+
+See `docs/hardware-demo-runbook.md` for how these three map onto the three
+independent test levels, and `scripts/preflight-hardware.sh` to check that all
+of them still build.
+
+## Camera Power (GPIO25) — deliberately NOT implemented
+
+The original car's Wemos D1 R32 used GPIO25 as a power-enable line for a
+*separate* ESP32-CAM board — not a signal into the camera itself.
+
+There is **no `hwCameraPower()` in this firmware, by choice.** An earlier
+draft added one (driving GPIO25 LOW at boot, never called from anywhere) and it
+was reverted, because:
+
+1. **The car is known-good at `f5d3306` and cannot be re-validated before the
+   demo.** Both boards live at the university. Driving a pin that the validated
+   firmware left alone is a real, untested behaviour change — GPIO25 goes from
+   floating to actively driven — on the one piece of hardware that currently
+   works. That is not worth it for code nothing calls.
+2. **The premise is unverified.** On the ESP32-CAM itself GPIO25 is **VSYNC**, a
+   different signal on a different chip. That the car's GPIO25 powers *this*
+   camera is an assumption nobody has confirmed on the present hardware.
+3. **Nothing needs it.** No RoveLink protocol message carries a camera-power
+   command, and the first camera streaming test is done with the ESP32-CAM
+   **independently powered** precisely so this variable is removed.
+
+Treat GPIO25 as its own physical experiment, to be run *after* the camera demo
+works. Wiring it up later would need a new `RemoteMessage` type in
+`protocol.ts`, a handler in `transport.cpp`, and a control in `web/`.
 
 ## Hardware Simulation
 

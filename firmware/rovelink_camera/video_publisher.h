@@ -38,3 +38,28 @@ void videoPublisherSendFrame(const uint8_t *jpeg, size_t len, int width, int hei
 
 // "down" | "registering" | "publishing", for the periodic [STATS] line.
 const char *videoPublisherStatusText();
+
+// --- Diagnostics for the periodic [STATS] line (README.md's DIAGNOSTICS
+// section). All are read-only accessors: nothing here changes publisher
+// behaviour, and none of them can expose VIDEO_PUBLISHER_SECRET.
+
+// Relay-minted stream session id, or "" when not currently accepted.
+const char *videoPublisherSessionId();
+
+// seq of the most recent frame ATTEMPTED on this session (see the
+// monotonicity note in videoPublisherSendFrame).
+long videoPublisherSeq();
+
+// Byte length of the most recent JPEG handed to videoPublisherSendFrame(),
+// whether or not the send succeeded. 0 before the first frame.
+size_t videoPublisherLastFrameBytes();
+
+// Count of frames whose header send failed (transport could not keep up or
+// the socket died mid-frame). These are DROPPED, never queued or retried.
+unsigned long videoPublisherSendFailures();
+
+// Why the last disconnect happened, as a short stable token — "none",
+// "wifi-lost", "socket-closed", or "rejected". Printed on reconnect so a
+// scrolling log says WHICH failure mode is recurring, rather than just
+// showing repeated "disconnected" lines.
+const char *videoPublisherLastCloseReason();

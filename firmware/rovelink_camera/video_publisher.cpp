@@ -30,6 +30,15 @@ static unsigned long backoffMs = BACKOFF_MIN_MS;
 static char streamSessionId[VIDEO_SESSION_ID_LEN] = "";
 static long seq = 0;
 
+// --- Diagnostics only (video_publisher.h). Never influence send/reconnect
+// behaviour; exist so the [STATS] line can distinguish "connected but not
+// authenticated", "authenticated but sending nothing", and "sending but the
+// transport keeps failing" — three very different faults that otherwise
+// look identical from outside.
+static size_t lastFrameBytes = 0;
+static unsigned long sendFailures = 0;
+static const char *lastCloseReason = "none";
+
 static void scheduleRetry()
 {
   Serial.print("[VIDEO] retry in ");
@@ -96,6 +105,9 @@ static void handleText(uint8_t *payload, size_t length)
     Serial.print("[VIDEO] rejected reason=");
     Serial.println(m["reason"].is<const char *>() ? m["reason"].as<const char *>() : "?");
     accepted = false;
+    // Records WHY, so the reconnect that follows is attributable. The
+    // reason string itself is relay-supplied and carries no credential.
+    lastCloseReason = "rejected";
     return;
   }
 
@@ -111,7 +123,9 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
     connected = true;
     backoffMs = BACKOFF_MIN_MS;
     wsClient.setReconnectInterval(backoffMs);
-    Serial.println("[VIDEO] connected");
+    Serial.print("[VIDEO] connected (previous close: ");
+    Serial.print(lastCloseReason);
+    Serial.println(")");
     sendRegister();
     break;
 
@@ -120,7 +134,12 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t length)
     break;
 
   case WStype_DISCONNECTED:
-    Serial.println("[VIDEO] disconnected");
+    // "rejected" is preserved if publisher.rejected already explained this
+    // disconnect; otherwise the socket died on its own.
+    if (strcmp(lastCloseReason, "rejected") != 0)
+      lastCloseReason = "socket-closed";
+    Serial.print("[VIDEO] disconnected reason=");
+    Serial.println(lastCloseReason);
     connected = false;
     accepted = false;
     streamSessionId[0] = '\0';
@@ -162,11 +181,17 @@ void videoPublisherLoop()
   {
     if (wsStarted)
     {
+      // Deliberate teardown because the NETWORK went away, not because the
+      // relay misbehaved: recorded as its own reason, and the backoff is
+      // reset so the first attempt after Wi-Fi returns is immediate rather
+      // than inheriting a long relay-side backoff that no longer applies.
+      lastCloseReason = "wifi-lost";
       wsClient.disconnect();
       wsStarted = false;
       connected = false;
       accepted = false;
       streamSessionId[0] = '\0';
+      backoffMs = BACKOFF_MIN_MS;
     }
     return;
   }
@@ -213,6 +238,7 @@ void videoPublisherSendFrame(const uint8_t *jpeg, size_t len, int width, int hei
   // attempt safely just leaves a gap rather than risking two frames ever
   // sharing one seq.
   seq += 1;
+  lastFrameBytes = len;
 
   JsonDocument doc;
   doc["v"] = VIDEO_PROTOCOL_VERSION;
@@ -241,7 +267,12 @@ void videoPublisherSendFrame(const uint8_t *jpeg, size_t len, int width, int hei
   // frame is ever queued or retried — see README.md's backpressure
   // section.
   if (!wsClient.sendTXT(header))
-    return; // header failed: never send an orphan binary with no preceding header for it
+  {
+    // Header failed: never send an orphan binary with no preceding header
+    // for it. Counted, not retried — the next tick sends a NEWER frame.
+    sendFailures += 1;
+    return;
+  }
 
   wsClient.sendBIN(const_cast<uint8_t *>(jpeg), len);
   // sendBIN()'s own result is not otherwise acted on: if it fails/partial-
@@ -249,6 +280,31 @@ void videoPublisherSendFrame(const uint8_t *jpeg, size_t len, int width, int hei
   // unmatched and is harmlessly overwritten by the next frame's header on
   // the next tick (video-relay/src/room.ts #handleFrameHeader always
   // overwrites pendingHeader) — never retried here.
+}
+
+const char *videoPublisherSessionId()
+{
+  return streamSessionId;
+}
+
+long videoPublisherSeq()
+{
+  return seq;
+}
+
+size_t videoPublisherLastFrameBytes()
+{
+  return lastFrameBytes;
+}
+
+unsigned long videoPublisherSendFailures()
+{
+  return sendFailures;
+}
+
+const char *videoPublisherLastCloseReason()
+{
+  return lastCloseReason;
 }
 
 const char *videoPublisherStatusText()

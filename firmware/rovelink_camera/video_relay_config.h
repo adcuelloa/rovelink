@@ -7,17 +7,19 @@
 
 // Active video relay profile.
 //
-// LOCAL is the default here — deliberately, not a placeholder: as of this
-// pass, `rovelink-video-relay` has never been deployed to Cloudflare under
-// either account this repo has access to (verified with `wrangler
-// deployments list` — the Worker does not exist yet, see
-// firmware/rovelink_camera/README.md's BLOCKER section). Today's first live
-// test can only reach a video relay running locally (`wrangler dev` in
-// video-relay/, on the same LAN as the camera). Switch to
-// VIDEO_RELAY_PROFILE_CLOUDFLARE once video-relay is actually deployed and
-// VIDEO_RELAY_HOST below is filled in with the real hostname — do not
-// invent one before then.
-#define VIDEO_RELAY_PROFILE VIDEO_RELAY_PROFILE_LOCAL
+// CLOUDFLARE is the default: `rovelink-video-relay` is now actually
+// deployed (verified — see docs/hardware-demo-runbook.md's Cloudflare
+// checklist), so the production transport described in
+// firmware/rovelink_camera/README.md is reachable from any network with
+// Internet access. That matters for the university session specifically:
+// the camera is on the university's Wi-Fi, not on a LAN shared with a
+// laptop running `wrangler dev`, so LOCAL would require extra setup the
+// session is supposed to avoid.
+//
+// LOCAL is kept only as a bench fallback for developing against
+// `wrangler dev` on the same LAN. It is NOT the production path and must
+// never be shipped as one.
+#define VIDEO_RELAY_PROFILE VIDEO_RELAY_PROFILE_CLOUDFLARE
 
 #if VIDEO_RELAY_PROFILE == VIDEO_RELAY_PROFILE_LOCAL
 
@@ -31,11 +33,17 @@
 
 #elif VIDEO_RELAY_PROFILE == VIDEO_RELAY_PROFILE_CLOUDFLARE
 
-// BLOCKER (see README.md): no deployed video-relay hostname exists yet.
-// Fill this in with the real hostname only after
-// `pnpm --filter @rovelink/video-relay deploy` (or a custom route) has
-// actually run — never invent one.
-#define VIDEO_RELAY_HOST "REPLACE_WITH_DEPLOYED_VIDEO_RELAY_HOSTNAME"
+// Real deployed hostname, from `wrangler deploy` output in video-relay/
+// (workers.dev subdomain `cuello`), confirmed serving
+// {"ok":true,"service":"rovelink-video-relay"} on GET /health over TLS.
+//
+// TLS TRUST: this host's chain is
+//   leaf CN=cuello.workers.dev -> GTS WE1 -> GTS Root R4
+// and GTS Root R4 is one of the three roots already in
+// cloudflare_ca_certs.h — verified with `openssl s_client`, the same chain
+// the already-validated control relay (rovelink-relay.cuello.dev) uses. No
+// new trust material is needed, and no insecure fallback exists here.
+#define VIDEO_RELAY_HOST "rovelink-video-relay.cuello.workers.dev"
 #define VIDEO_RELAY_PORT 443
 #define VIDEO_RELAY_USE_TLS 1
 

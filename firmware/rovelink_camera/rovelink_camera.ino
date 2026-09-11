@@ -104,21 +104,58 @@ static void publishTick()
 const unsigned long STATS_INTERVAL_MS = 10000;
 unsigned long lastStatsMs = 0;
 
+// Frames sent as of the previous [STATS] print, so FPS is measured over the
+// last window rather than averaged since boot — an average since boot hides
+// a stream that was healthy for a minute and has been dead ever since.
+static unsigned long framesSentAtLastStats = 0;
+
 // Heartbeat-style status line: if this keeps printing with a sane wifi/
-// video state, the loop hasn't wedged.
+// video state, the loop hasn't wedged. Carries every field the runbook
+// needs to localise a fault to one layer (docs/hardware-demo-runbook.md):
+// Wi-Fi association + signal, WSS/auth state, the relay-minted session,
+// sequence progress, current JPEG size, live FPS, and both drop counters.
+// Deliberately prints NO credential: not the publisher token, not the
+// Wi-Fi password.
 static void printStats()
 {
   if (millis() - lastStatsMs < STATS_INTERVAL_MS)
     return;
+  const unsigned long elapsedMs = millis() - lastStatsMs;
   lastStatsMs = millis();
+
+  const unsigned long sentThisWindow = framesSent - framesSentAtLastStats;
+  framesSentAtLastStats = framesSent;
+  // Integer tenths of a frame per second: avoids pulling in float printing
+  // for a diagnostic line. 83 means 8.3 fps.
+  const unsigned long fpsTenths = elapsedMs > 0 ? (sentThisWindow * 10000UL) / elapsedMs : 0;
+
   Serial.print("[STATS] wifi=");
   Serial.print(cameraNetworkStatusText());
-  Serial.print(" video=");
+  Serial.print(" rssi=");
+  Serial.print(cameraNetworkRssi());
+  Serial.print("dBm video=");
   Serial.print(videoPublisherStatusText());
+  Serial.print(" session=");
+  const char *session = videoPublisherSessionId();
+  Serial.print(session[0] != '\0' ? session : "-");
+  Serial.print(" seq=");
+  Serial.print(videoPublisherSeq());
+  Serial.print(" jpegBytes=");
+  Serial.print(videoPublisherLastFrameBytes());
+  Serial.print(" fps=");
+  Serial.print(fpsTenths / 10);
+  Serial.print(".");
+  Serial.print(fpsTenths % 10);
   Serial.print(" sent=");
   Serial.print(framesSent);
   Serial.print(" dropped=");
-  Serial.println(framesDropped);
+  Serial.print(framesDropped);
+  Serial.print(" sendFail=");
+  Serial.print(videoPublisherSendFailures());
+  Serial.print(" lastClose=");
+  Serial.print(videoPublisherLastCloseReason());
+  Serial.print(" heap=");
+  Serial.println(ESP.getFreeHeap());
 }
 
 void loop()

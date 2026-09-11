@@ -82,7 +82,10 @@ void cameraNetworkLoop()
     {
       Serial.println(hadPreviousConnection ? "[WIFI] reconnected" : "[WIFI] connected");
       Serial.print("[WIFI] ip=");
-      Serial.println(WiFi.localIP());
+      Serial.print(WiFi.localIP());
+      Serial.print(" rssi=");
+      Serial.print(WiFi.RSSI());
+      Serial.println("dBm");
       hadPreviousConnection = true;
       state = NET_CONNECTED;
       backoffMs = BACKOFF_MIN_MS;
@@ -116,6 +119,11 @@ void cameraNetworkLoop()
 bool cameraNetworkConnected()
 {
   return state == NET_CONNECTED;
+}
+
+int cameraNetworkRssi()
+{
+  return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
 }
 
 const char *cameraNetworkStatusText()
