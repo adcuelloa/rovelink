@@ -57,8 +57,8 @@
 // the driver's own ring buffer — this is the camera driver's OWN
 // latest-frame-wins policy, on top of which the publisher adds its own
 // (see video_publisher.cpp).
-#define CAM_PSRAM_FRAMESIZE FRAMESIZE_VGA // 640x480
-#define CAM_PSRAM_JPEG_QUALITY 12
+#define CAM_PSRAM_FRAMESIZE FRAMESIZE_QVGA // 320x240
+#define CAM_PSRAM_JPEG_QUALITY 20
 #define CAM_PSRAM_FB_COUNT 2
 
 #define CAM_NO_PSRAM_FRAMESIZE FRAMESIZE_QQVGA // 160x120
@@ -76,8 +76,8 @@
 // inside the ~15-30 KB/frame VGA/quality-12 estimate MAX_JPEG_BYTES was
 // sized against (see protocol/src/video.ts). Low latency over image
 // quality for this first remote test — do not raise resolution or FPS
-// without new evidence from a live test.
-#define TARGET_FPS 10
+// without new evidence from a live test. la
+#define TARGET_FPS 15
 #define FRAME_INTERVAL_MS (1000 / TARGET_FPS)
 
 // --- Video wire protocol (protocol/src/video.ts) ---
