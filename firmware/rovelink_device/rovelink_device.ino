@@ -86,7 +86,7 @@ float clampAxis(float v)
 // Differential mixing: steering is subtracted from one wheel and added to the other.
 void applyMotors(float throttle, float steering)
 {
-  hwApplyMotors(clampAxis(throttle + steering), clampAxis(throttle - steering));
+  hwApplyMotors(clampAxis(throttle - steering), clampAxis(throttle + steering));
 }
 
 // Safe state: where we fall to on disarm, emergency stop, TTL expiry, or link loss.
