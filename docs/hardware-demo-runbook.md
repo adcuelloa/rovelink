@@ -144,9 +144,10 @@ AI-Thinker ESP32-CAM has no USB. You need an FTDI/CH340 3.3V USB-TTL adapter:
 | TX      | U0R       |
 | RX      | U0T       |
 
-> ⚠️ **Power the ESP32-CAM independently** for the first camera test. Do **not**
-> rely on the car's GPIO25 line (see §5). Many USB-TTL adapters cannot supply the
-> ~300 mA peak the OV2640 draws; brownout looks exactly like a dead camera.
+> For this standalone flashing test, the adapter supplies the camera. Once
+> installed on the car, the Wemos powers it through GPIO25. Many USB-TTL
+> adapters cannot supply the ~300 mA peak the OV2640 draws; brownout looks
+> exactly like a dead camera.
 
 - **Diagnostic:** `dmesg | tail -20`
 - **Fallback:** try another USB cable/port, then a separate 5V supply (common GND).
@@ -344,21 +345,11 @@ exactly why it is a fallback and not the production path.
 
 ---
 
-## 5. GPIO25 — a separate, unvalidated physical item
+## 5. GPIO25 — camera power on the car
 
-**Do not assume GPIO25 on the car powers the ESP32-CAM.**
-
-On the _car_ (Wemos D1 R32), GPIO25 was used by the old firmware as a
-power-enable line for a separate camera board. On the _ESP32-CAM itself_,
-GPIO25 is **VSYNC** — a completely different signal on a different chip.
-
-This has never been validated on the current hardware, so it is deliberately
-**not implemented** in the car firmware: driving a pin on a board that is
-already known-good, for an effect nobody has confirmed, is exactly how a
-validated car stops being validated.
-
-Treat it as its own experiment, _after_ the camera demo works, and only with the
-ESP32-CAM independently powered.
+The Wemos D1 R32 holds GPIO25 LOW briefly during boot, then drives it HIGH to
+power the separate ESP32-CAM. On the ESP32-CAM itself, GPIO25 is **VSYNC** — a
+different signal on a different board.
 
 ---
 

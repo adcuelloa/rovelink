@@ -125,18 +125,10 @@ strategy.
 
 ## GPIO25 / Wemos Camera Power
 
-The original car's Wemos used GPIO25 as a power-enable line for a separate
-camera board (not a signal into the camera itself). **There is no
-`hwCameraPower()` in the car firmware** — an earlier draft added one and it
-was reverted to avoid changing a pin's behaviour on hardware that is
-known-good at `f5d3306` and cannot be re-validated before the demo (see
-`firmware/README.md`). Note also that on the ESP32-CAM itself GPIO25 is
-**VSYNC**, a different signal on a different chip.
-
-**This firmware makes no assumption about how the camera is powered, and the
-first streaming test requires the ESP32-CAM to be powered independently**
-(its own supply, or a bench supply). GPIO25 is tracked as its own physical
-experiment, to be run after the camera demo works.
+The car's Wemos uses GPIO25 to power the separate camera board. The real-car
+firmware holds that pin LOW briefly during boot, then drives it HIGH and keeps
+it on; this camera firmware then boots and connects normally. GPIO25 on the
+ESP32-CAM itself remains **VSYNC** and is unrelated.
 
 ## Video relay: DEPLOYED (resolved 2026-09-10)
 

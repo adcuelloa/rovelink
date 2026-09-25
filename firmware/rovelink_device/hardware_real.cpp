@@ -32,6 +32,7 @@
 #define BUZZER_PIN 5
 #define SERVO_GRIPPER_PIN 26 // ⚠ Flash/PSRAM bus on ESP32-S3
 #define LED_LINK_PIN 18
+#define CAMERA_POWER_PIN 25
 
 #define GRIPPER_OPEN_POS 90
 #define GRIPPER_CLOSE_POS 120
@@ -39,6 +40,9 @@
 // Minimum PWM that actually moves the car; below this the motor just hums.
 static const int PWM_MIN = 90;
 static const int PWM_MAX = 255;
+// boot-time power-cycle; tune only if this camera needs a longer
+// fully-off interval before its supply rises.
+static const unsigned long CAMERA_POWER_OFF_MS = 500;
 
 static Servo servoGripper;
 
@@ -70,8 +74,13 @@ void hwSetup()
   pinMode(ENB, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_LINK_PIN, OUTPUT);
+  pinMode(CAMERA_POWER_PIN, OUTPUT);
+  digitalWrite(CAMERA_POWER_PIN, LOW);
   hwStopMotors();
   digitalWrite(LED_LINK_PIN, LOW);
+  // Give the camera a real LOW -> HIGH power edge after the Wemos boots.
+  delay(CAMERA_POWER_OFF_MS);
+  digitalWrite(CAMERA_POWER_PIN, HIGH);
 
   ESP32PWM::allocateTimer(3);
   servoGripper.setPeriodHertz(50);
