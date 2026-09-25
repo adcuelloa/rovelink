@@ -1,6 +1,6 @@
 # RoveLink hardware-demo runbook
 
-**Purpose:** the university session is for *flashing and physical validation only*.
+**Purpose:** the university session is for _flashing and physical validation only_.
 No architecture work, no dependency installation, ideally no compilation.
 
 Everything in this document was prepared and verified on **2026-09-10** with no
@@ -16,18 +16,18 @@ Run `scripts/preflight-hardware.sh` before leaving. If it prints
 The levels exist so a failure localises itself. Always go **up** the levels, and
 when something breaks, drop **down** one to find out which layer owns the fault.
 
-| Level | What it is | Proves | Needs network? |
-|---|---|---|---|
-| **1** | Old known-good firmware, `~/Projects/compiladores/firmware/carro_pinza_wifi/` | The physical camera + your flashing setup work at all | LAN only |
-| **2** | `firmware/rovelink_camera_smoketest/` | OV2640 + PSRAM + ribbon + power — **no networking at all** | No |
-| **3** | `firmware/rovelink_camera/` | Wi-Fi + TLS + relay auth + browser render | Internet |
+| Level | What it is                                                                    | Proves                                                     | Needs network? |
+| ----- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------- |
+| **1** | Old known-good firmware, `~/Projects/compiladores/firmware/carro_pinza_wifi/` | The physical camera + your flashing setup work at all      | LAN only       |
+| **2** | `firmware/rovelink_camera_smoketest/`                                         | OV2640 + PSRAM + ribbon + power — **no networking at all** | No             |
+| **3** | `firmware/rovelink_camera/`                                                   | Wi-Fi + TLS + relay auth + browser render                  | Internet       |
 
-> **Level 1 is a read-only fallback.** `~/Projects/compiladores` is *not modified*
+> **Level 1 is a read-only fallback.** `~/Projects/compiladores` is _not modified_
 > by any of this work and stays usable exactly as it was.
 
 **Level 2 is the important one.** It has zero configuration and zero secrets, so
 it cannot be misconfigured. If Level 2 shows clean JPEG frames and Level 3 shows
-no video, the camera hardware is *proven good* and the problem is entirely in
+no video, the camera hardware is _proven good_ and the problem is entirely in
 Wi-Fi/TLS/relay — which saves the session.
 
 ---
@@ -36,22 +36,22 @@ Wi-Fi/TLS/relay — which saves the session.
 
 Both Workers are deployed and healthy. **No secret values appear in this file.**
 
-| Item | Value | Status |
-|---|---|---|
-| Control relay | `wss://rovelink-relay.cuello.dev` | deployed, `/health` 200 |
-| Video relay | `wss://rovelink-video-relay.cuello.workers.dev` | deployed, `/health` 200 |
-| Cloudflare account | `Andrés Cuello account` (`8ddbff42…`) | — |
+| Item               | Value                                           | Status                  |
+| ------------------ | ----------------------------------------------- | ----------------------- |
+| Control relay      | `wss://rovelink-relay.cuello.dev`               | deployed, `/health` 200 |
+| Video relay        | `wss://rovelink-video-relay.cuello.workers.dev` | deployed, `/health` 200 |
+| Cloudflare account | `Andrés Cuello account` (`8ddbff42…`)           | —                       |
 
 ### Required secrets
 
-| Secret | Where it lives | Set? |
-|---|---|---|
-| `VIDEO_PUBLISHER_SECRET` | video relay (Worker secret) | yes |
-| `VIDEO_PUBLISHER_SECRET` | `firmware/rovelink_camera/video_secrets.h` (gitignored, mode 600) | yes — **must equal** the Worker's |
-| `VIDEO_TICKET_SECRET` | control relay (Worker secret) | yes |
-| `VIDEO_TICKET_SECRET` | video relay (Worker secret) | yes — **must be byte-for-byte identical** to the control relay's |
-| `DEVICE_SECRET` | control relay + `firmware/rovelink_device/device_secrets.h` | yes |
-| `CONTROLLER_SECRET` | control relay; typed into the browser at login | yes |
+| Secret                   | Where it lives                                                    | Set?                                                             |
+| ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `VIDEO_PUBLISHER_SECRET` | video relay (Worker secret)                                       | yes                                                              |
+| `VIDEO_PUBLISHER_SECRET` | `firmware/rovelink_camera/video_secrets.h` (gitignored, mode 600) | yes — **must equal** the Worker's                                |
+| `VIDEO_TICKET_SECRET`    | control relay (Worker secret)                                     | yes                                                              |
+| `VIDEO_TICKET_SECRET`    | video relay (Worker secret)                                       | yes — **must be byte-for-byte identical** to the control relay's |
+| `DEVICE_SECRET`          | control relay + `firmware/rovelink_device/device_secrets.h`       | yes                                                              |
+| `CONTROLLER_SECRET`      | control relay; typed into the browser at login                    | yes                                                              |
 
 `VIDEO_TICKET_SECRET` matching across **both** relays was not assumed — it was
 proved end to end: the control relay minted a ticket, the video relay accepted
@@ -65,7 +65,7 @@ VITE_VIDEO_RELAY_URL=wss://rovelink-video-relay.cuello.workers.dev
 VITE_ROBOT_ID=robot-01
 ```
 
-If `VITE_VIDEO_RELAY_URL` is unset the video panel is *disabled*, not broken —
+If `VITE_VIDEO_RELAY_URL` is unset the video panel is _disabled_, not broken —
 so a missing value looks like "no video panel", not like a bug.
 
 ### Re-deploying (only if you must)
@@ -111,7 +111,7 @@ viewer:    received=117 dropped=77 dup=0 ooo=0 latency≈200ms reconnects=0
 ```
 
 `dup=0 ooo=0` is the important part: no duplicate or out-of-order frames.
-`dropped` is the *intended* latest-frame-wins backpressure, not an error —
+`dropped` is the _intended_ latest-frame-wins backpressure, not an error —
 the relay skips stale frames for a viewer that has not acked yet.
 
 > **Note:** `CONTROLLER_SECRET` in `relay/.dev.vars` is stored **quoted**. Strip
@@ -138,11 +138,11 @@ failed step — take the fallback.
 AI-Thinker ESP32-CAM has no USB. You need an FTDI/CH340 3.3V USB-TTL adapter:
 
 | Adapter | ESP32-CAM |
-|---|---|
-| 5V | 5V |
-| GND | GND |
-| TX | U0R |
-| RX | U0T |
+| ------- | --------- |
+| 5V      | 5V        |
+| GND     | GND       |
+| TX      | U0R       |
+| RX      | U0T       |
 
 > ⚠️ **Power the ESP32-CAM independently** for the first camera test. Do **not**
 > rely on the car's GPIO25 line (see §5). Many USB-TTL adapters cannot supply the
@@ -183,7 +183,7 @@ The AI-Thinker ESP32-CAM has **no auto-reset circuit**. You must do this by hand
 
 - **Diagnostic:** if you see `Failed to connect to ESP32: Wrong boot mode detected`,
   GPIO0 was not grounded at reset.
-- **Fallback:** hold GPIO0 to GND, tap RST, and start the upload *within ~2s*.
+- **Fallback:** hold GPIO0 to GND, tap RST, and start the upload _within ~2s_.
 
 ### E. Upload the smoke-test binary (Level 2)
 
@@ -196,9 +196,9 @@ arduino-cli upload \
   -p /dev/ttyUSB0
 ```
 
-*(Verified 2026-09-10: arduino-cli 1.4.1 accepted these flags, resolved the
+_(Verified 2026-09-10: arduino-cli 1.4.1 accepted these flags, resolved the
 binaries and invoked esptool v5.3.1, failing only because no board was attached.
-`arduino-cli upload` does **not** compile.)*
+`arduino-cli upload` does **not** compile.)_
 
 - **Diagnostic:** add `-v` for the full esptool command line.
 - **Fallback — compile from source** (works offline, everything is installed):
@@ -236,7 +236,7 @@ Expected:
 - **Fallback:** if `esp_camera_init failed`, reseat the ribbon (gold contacts
   toward the board), verify 5V, then drop to **Level 1** and flash the old
   known-good firmware from `~/Projects/compiladores` to decide whether the
-  *camera module itself* is dead.
+  _camera module itself_ is dead.
 
 **Do not proceed to Level 3 until Level 2 is clean.**
 
@@ -252,11 +252,13 @@ arduino-cli upload \
 > ⚠️ `firmware/rovelink_camera/wifi_secrets.h` is baked into this binary at
 > **compile** time. If the university Wi-Fi differs from what is in that file,
 > edit it and recompile — this is the one case that needs a compile on site:
+>
 > ```bash
 > arduino-cli compile --fqbn esp32:esp32:esp32cam \
 >   --output-dir artifacts/hardware-demo/esp32cam-rovelink \
 >   firmware/rovelink_camera
 > ```
+>
 > The ESP32 cannot use WPA2-Enterprise networks with this firmware — use a
 > phone hotspot or a WPA2-Personal SSID.
 
@@ -346,8 +348,8 @@ exactly why it is a fallback and not the production path.
 
 **Do not assume GPIO25 on the car powers the ESP32-CAM.**
 
-On the *car* (Wemos D1 R32), GPIO25 was used by the old firmware as a
-power-enable line for a separate camera board. On the *ESP32-CAM itself*,
+On the _car_ (Wemos D1 R32), GPIO25 was used by the old firmware as a
+power-enable line for a separate camera board. On the _ESP32-CAM itself_,
 GPIO25 is **VSYNC** — a completely different signal on a different chip.
 
 This has never been validated on the current hardware, so it is deliberately
@@ -355,7 +357,7 @@ This has never been validated on the current hardware, so it is deliberately
 already known-good, for an effect nobody has confirmed, is exactly how a
 validated car stops being validated.
 
-Treat it as its own experiment, *after* the camera demo works, and only with the
+Treat it as its own experiment, _after_ the camera demo works, and only with the
 ESP32-CAM independently powered.
 
 ---
@@ -386,18 +388,18 @@ arduino-cli monitor -p /dev/ttyUSB0 -c baudrate=115200
 
 ### Pinned versions (all installed locally — no downloads needed)
 
-| Component | Version |
-|---|---|
-| arduino-cli | 1.4.1 |
-| esp32:esp32 core | 3.3.11 |
-| esptool | 5.3.1 |
-| ArduinoJson | 7.4.3 |
-| WebSockets | 2.7.2 |
-| ESP32Servo | 3.2.1 |
+| Component        | Version |
+| ---------------- | ------- |
+| arduino-cli      | 1.4.1   |
+| esp32:esp32 core | 3.3.11  |
+| esptool          | 5.3.1   |
+| ArduinoJson      | 7.4.3   |
+| WebSockets       | 2.7.2   |
+| ESP32Servo       | 3.2.1   |
 
 ### FQBNs
 
-| Board | FQBN |
-|---|---|
-| Wemos D1 R32 (original car) | `esp32:esp32:esp32` |
-| AI-Thinker ESP32-CAM | `esp32:esp32:esp32cam` |
+| Board                       | FQBN                   |
+| --------------------------- | ---------------------- |
+| Wemos D1 R32 (original car) | `esp32:esp32:esp32`    |
+| AI-Thinker ESP32-CAM        | `esp32:esp32:esp32cam` |
