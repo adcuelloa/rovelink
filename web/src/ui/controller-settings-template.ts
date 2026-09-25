@@ -5,6 +5,7 @@
  */
 
 import { CONTROLLER_DIAGRAM_SVG } from './controller-diagram.ts';
+import { SKIN_PRESETS } from './controller-skin.ts';
 
 const ACTION_ROW = (action: string, label: string): string => `
   <li class="binding-row" data-action="${action}">
@@ -33,6 +34,24 @@ export const CONTROLLER_SETTINGS_TEMPLATE = `
 
       <div class="controller-diagram" id="controller-diagram">
         ${CONTROLLER_DIAGRAM_SVG}
+      </div>
+
+      <div class="controller-skin">
+        <div class="controller-skin__swatches" role="group" aria-label="Controller colour">
+          ${SKIN_PRESETS.map(
+            (p) =>
+              `<button type="button" class="controller-skin__swatch" data-skin="${p.id}" aria-label="${p.label}" title="${p.label}" aria-pressed="false"></button>`,
+          ).join('')}
+        </div>
+        <label class="controller-skin__custom">
+          <span class="label">Shell</span>
+          <input type="color" id="skin-shell" />
+        </label>
+        <label class="controller-skin__custom">
+          <span class="label">Core</span>
+          <input type="color" id="skin-core" />
+        </label>
+        <button type="button" class="button controller-skin__values" id="diagram-values" aria-pressed="false">Show values</button>
       </div>
 
       <dl class="settings-live" id="settings-live">

@@ -26,8 +26,10 @@ import { loadProfile, resetToRacing, resetToStick, saveProfile } from '../contro
 import { describeIssue, validateProfile } from '../control/profile-validate.ts';
 import type { ControllerProfile, ProfileId } from '../control/profile.ts';
 import { evaluateProfile, RACING_PROFILE, STICK_PROFILE, toCustom } from '../control/profile.ts';
-import { STICK_AXIS_PAIRS } from './controller-diagram.ts';
+import { createDiagramUpdater } from './controller-diagram.ts';
 import { CONTROLLER_SETTINGS_TEMPLATE } from './controller-settings-template.ts';
+import type { ControllerSkin } from './controller-skin.ts';
+import { applySkin, loadSkin, presetFor, saveSkin, SKIN_PRESETS } from './controller-skin.ts';
 import { $ } from './dom.ts';
 
 export interface ControllerSettingsOptions {
@@ -99,6 +101,12 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
   const liveThrottle = $('#live-throttle', HTMLElement);
   const liveSteering = $('#live-steering', HTMLElement);
   const profileDescriptionLine = $('#profile-description', HTMLParagraphElement);
+  const diagramRoot = $('#controller-diagram', HTMLDivElement);
+  const diagram = createDiagramUpdater(diagramRoot);
+  const valuesToggle = $('#diagram-values', HTMLButtonElement);
+  const shellInput = $('#skin-shell', HTMLInputElement);
+  const coreInput = $('#skin-core', HTMLInputElement);
+  const swatches = [...container.querySelectorAll<HTMLButtonElement>('[data-skin]')];
 
   let activeProfile: ControllerProfile = loadProfile();
   let customDraft: ControllerProfile =
@@ -371,6 +379,43 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
     });
   }
 
+  // --- wiring: diagram colour + values overlay (cosmetic only) --------------
+  function showSkin(skin: ControllerSkin): void {
+    applySkin(diagramRoot, skin);
+    shellInput.value = skin.shell;
+    coreInput.value = skin.core;
+    const preset = presetFor(skin);
+    for (const swatch of swatches) {
+      swatch.setAttribute('aria-pressed', String(swatch.dataset.skin === preset?.id));
+    }
+  }
+
+  function setSkin(skin: ControllerSkin): void {
+    saveSkin(skin);
+    showSkin(skin);
+  }
+
+  for (const swatch of swatches) {
+    const preset = SKIN_PRESETS.find((p) => p.id === swatch.dataset.skin);
+    if (preset === undefined) continue;
+    swatch.style.setProperty('--swatch-shell', preset.skin.shell);
+    swatch.style.setProperty('--swatch-core', preset.skin.core);
+    swatch.addEventListener('click', () => setSkin(preset.skin));
+  }
+  shellInput.addEventListener('input', () =>
+    setSkin({ shell: shellInput.value, core: coreInput.value }),
+  );
+  coreInput.addEventListener('input', () =>
+    setSkin({ shell: shellInput.value, core: coreInput.value }),
+  );
+  showSkin(loadSkin());
+
+  valuesToggle.addEventListener('click', () => {
+    const show = valuesToggle.getAttribute('aria-pressed') !== 'true';
+    valuesToggle.setAttribute('aria-pressed', String(show));
+    diagram.setShowValues(show);
+  });
+
   // --- wiring: close --------------------------------------------------------
   function close(): void {
     unmount();
@@ -389,6 +434,7 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
       if (gamepadId !== null) {
         gamepadId = null;
         statusLine.textContent = 'Controller: not detected';
+        diagram.update(ZERO_SEMANTIC_VALUES);
       }
       return;
     }
@@ -412,15 +458,7 @@ export function mountControllerSettings(options: ControllerSettingsOptions): () 
     liveThrottle.textContent = `${Math.round(input.throttle * 100)}%`;
     liveSteering.textContent = `${Math.round(input.steering * 100)}%`;
 
-    for (const control of ALL_CONTROLS) {
-      const el = document.getElementById(`ctrl-${control}`);
-      if (el === null) continue;
-      const active = isAxisControl(control)
-        ? Math.abs(values[control]) > DEFAULT_DEADZONE.stick ||
-          Math.abs(values[STICK_AXIS_PAIRS[control] ?? control]) > DEFAULT_DEADZONE.stick
-        : values[control] > 0.5;
-      el.classList.toggle('controller-diagram__active', active);
-    }
+    diagram.update(values);
 
     if (rebindStep !== null) {
       const control = detectActivation(previousValues, values);

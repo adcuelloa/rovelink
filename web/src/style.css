@@ -493,73 +493,175 @@ body {
     @apply border-sodium bg-sodium text-carbon;
   }
 
+  /* Controller diagram (Problem 9 §11). Colours come from the operator's
+   * skin (ui/controller-skin.ts sets --pad-*); the fallbacks match the
+   * default "Midnight" skin. Strokes are non-scaling so line weight stays
+   * crisp whatever size the 1117-unit-wide SVG renders at. */
   .controller-diagram {
+    --pad-shell: #2a2c33;
+    --pad-core: #16171b;
+    --pad-ink: #f4f5f7;
+    --pad-core-ink: #f4f5f7;
     @apply border-groove grid place-items-center rounded-md border bg-white/[0.03] p-2;
   }
 
   .controller-diagram__svg {
-    @apply w-full max-w-100;
+    @apply w-full;
   }
 
-  .controller-diagram__body {
-    fill: var(--color-panel);
-    stroke: var(--color-groove);
-    stroke-width: 2;
+  .controller-diagram__svg * {
+    vector-effect: non-scaling-stroke;
   }
 
-  /* Decorative-only regions (Problem 9 §11) — no bindable PhysicalControl
-   * exists for the touchpad or the PS/home roundel, so they never carry
+  .controller-diagram__shell {
+    fill: var(--pad-shell);
+    stroke: color-mix(in oklab, var(--pad-ink) 55%, transparent);
+    stroke-width: 1.5;
+  }
+
+  .controller-diagram__core {
+    fill: var(--pad-core);
+  }
+
+  .controller-diagram__outline {
+    fill: none;
+    stroke: color-mix(in oklab, var(--pad-ink) 55%, transparent);
+    stroke-width: 1.5;
+  }
+
+  /* Decorative-only regions — no bindable PhysicalControl exists for the
+   * touchpad, mute button or home roundel, so they never carry
    * `data-control` and never highlight. */
   .controller-diagram__touchpad {
-    fill: rgb(255 255 255 / 0.04);
-    stroke: var(--color-groove);
-    stroke-width: 1;
+    fill: color-mix(in oklab, var(--pad-shell) 92%, var(--pad-ink));
   }
-  .controller-diagram__home {
-    fill: rgb(255 255 255 / 0.03);
-    stroke: var(--color-groove);
-    stroke-width: 1;
+  .controller-diagram__decor {
+    fill: none;
+    stroke: color-mix(in oklab, var(--pad-core-ink) 40%, transparent);
+    stroke-width: 1.25;
   }
 
-  .controller-diagram__control rect,
-  .controller-diagram__control circle {
-    fill: rgb(255 255 255 / 0.08);
-    stroke: var(--color-groove);
-    stroke-width: 1;
+  .controller-diagram__cap {
+    fill: color-mix(in oklab, var(--pad-shell) 82%, var(--pad-ink));
+    stroke: color-mix(in oklab, var(--pad-ink) 70%, transparent);
+    stroke-width: 1.5;
     transition:
       fill 100ms ease-out,
       stroke 100ms ease-out;
   }
 
-  /* Printed face-button symbols — thin outline, never filled, so pressing
-   * the button (which recolors its cap) does not turn the glyph into a
-   * second solid shape. */
+  /* Sticks sit on the core, not the shell. */
+  .controller-diagram__well {
+    fill: color-mix(in oklab, var(--pad-core) 85%, var(--pad-core-ink));
+    stroke: color-mix(in oklab, var(--pad-core-ink) 55%, transparent);
+  }
+  .controller-diagram__stick {
+    fill: color-mix(in oklab, var(--pad-core) 65%, var(--pad-core-ink));
+    stroke: color-mix(in oklab, var(--pad-core-ink) 70%, transparent);
+  }
+
+  /* Analog trigger depth, clipped to the trigger shape. */
+  .controller-diagram__fill {
+    fill: var(--color-sodium);
+    pointer-events: none;
+  }
+
+  /* Printed symbols — outline only, so pressing a button (which recolours
+   * its cap) never turns the glyph into a second solid shape. */
   .controller-diagram__glyph {
     fill: none;
-    stroke: var(--color-ice-2);
-    stroke-width: 1.6;
+    stroke: color-mix(in oklab, var(--pad-ink) 75%, transparent);
+    stroke-width: 1.75;
     pointer-events: none;
+  }
+  .controller-diagram__glyph--filled {
+    fill: color-mix(in oklab, var(--pad-ink) 75%, transparent);
+    stroke: none;
   }
 
   .controller-diagram__control {
     cursor: pointer;
+    outline: none;
   }
 
-  .controller-diagram__control:hover rect,
-  .controller-diagram__control:hover circle,
-  .controller-diagram__control:focus-visible rect,
-  .controller-diagram__control:focus-visible circle {
-    stroke: var(--color-ice-2);
+  .controller-diagram__control:hover .controller-diagram__cap,
+  .controller-diagram__control:focus-visible .controller-diagram__cap {
+    stroke: var(--color-sodium);
+    stroke-width: 2.5;
   }
 
-  .controller-diagram__control.controller-diagram__active rect,
-  .controller-diagram__control.controller-diagram__active circle {
+  .controller-diagram__control.controller-diagram__active .controller-diagram__cap {
     fill: var(--color-sodium);
     stroke: var(--color-sodium);
   }
 
+  /* Triggers show depth through their fill, not an on/off repaint. */
+  .controller-diagram__control.controller-diagram__active .controller-diagram__cap--trigger {
+    fill: color-mix(in oklab, var(--pad-shell) 82%, var(--pad-ink));
+  }
+
   .controller-diagram__control.controller-diagram__active .controller-diagram__glyph {
     stroke: var(--color-carbon);
+  }
+  .controller-diagram__control.controller-diagram__active .controller-diagram__glyph--filled {
+    fill: var(--color-carbon);
+  }
+
+  /* "Show values" overlay: crosshairs, centre dots, numeric readouts. */
+  .controller-diagram__values {
+    display: none;
+    pointer-events: none;
+  }
+  .controller-diagram--values .controller-diagram__values {
+    display: inline;
+  }
+  .controller-diagram__crosshair {
+    fill: none;
+    stroke: color-mix(in oklab, var(--pad-core-ink) 50%, transparent);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+  }
+  .controller-diagram__dot {
+    fill: var(--color-alert);
+  }
+  .controller-diagram__readout {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    fill: var(--color-ice);
+  }
+
+  .controller-skin {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .controller-skin__swatches {
+    @apply flex gap-1.5;
+  }
+
+  .controller-skin__swatch {
+    @apply border-groove size-6 cursor-pointer rounded-full border;
+    background: linear-gradient(135deg, var(--swatch-shell) 55%, var(--swatch-core) 55%);
+  }
+
+  .controller-skin__swatch[aria-pressed='true'] {
+    outline: 2px solid var(--color-sodium);
+    outline-offset: 2px;
+  }
+
+  .controller-skin__custom {
+    @apply flex items-center gap-1.5;
+  }
+
+  .controller-skin__custom input {
+    @apply border-groove h-6 w-8 cursor-pointer rounded border bg-transparent p-0;
+  }
+
+  .controller-skin__values {
+    @apply ml-auto min-h-8 px-3 text-[0.6rem];
+  }
+
+  .controller-skin__values[aria-pressed='true'] {
+    @apply border-sodium bg-sodium text-carbon;
   }
 
   .settings-live {

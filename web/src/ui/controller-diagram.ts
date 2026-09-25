@@ -1,100 +1,53 @@
 /**
- * Inline SVG, top-down DualSense-style controller diagram (Problem 9 §11).
+ * Inline SVG DualSense diagram (Problem 9 §11) with live input rendering.
  *
- * An original vector silhouette built from primitives — proportioned and
- * laid out to read as a modern dual-grip controller (asymmetric grip pods,
- * a top touchpad, curved shoulder triggers), not a copy of any
- * manufacturer's asset, and carrying no manufacturer logos or trademarks.
+ * Geometry comes from daidr/dualsense-tester (MIT) — see dualsense-paths.ts
+ * for the attribution and the licence text. That source's manufacturer
+ * logo is left out; a plain home roundel sits in its place.
  *
  * Every *interactive* region (the physical controls this app actually
  * binds — see control/controls.ts) carries `data-control="<PhysicalControl>"`
  * and a matching `id="ctrl-<PhysicalControl>"`, so the settings view can
  * look elements up directly for live highlighting and click-to-rebind
- * without re-querying by position. The body outline, touchpad, and PS/home
+ * without re-querying by position. The body, touchpad, mute button and home
  * roundel are decorative only — this app has no bindable "touchpad" or
  * "home" physical control — and carry no such attributes.
+ *
+ * Colour comes from CSS custom properties (`--pad-shell`, `--pad-core`,
+ * `--pad-ink`, `--pad-core-ink`) — see controller-skin.ts.
  */
 
-import { ALL_CONTROLS } from '../control/controls.ts';
-import type { PhysicalControl } from '../control/controls.ts';
-
-interface Shape {
-  readonly control: PhysicalControl;
-  readonly label: string;
-  readonly svg: string;
-}
-
-const TITLE = (control: PhysicalControl, label: string): string =>
-  `<title>${label.length > 0 ? label : control}</title>`;
-
-const RECT = (
-  control: PhysicalControl,
-  label: string,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r = 6,
-): Shape => ({
-  control,
-  label,
-  svg: `<g data-control="${control}" id="ctrl-${control}" tabindex="0" role="button" aria-label="${label.length > 0 ? label : control}" class="controller-diagram__control">${TITLE(control, label)}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"></rect></g>`,
-});
-
-const CIRCLE = (
-  control: PhysicalControl,
-  label: string,
-  cx: number,
-  cy: number,
-  radius: number,
-  glyph = '',
-): Shape => ({
-  control,
-  label,
-  svg: `<g data-control="${control}" id="ctrl-${control}" tabindex="0" role="button" aria-label="${label.length > 0 ? label : control}" class="controller-diagram__control">${TITLE(control, label)}<circle cx="${cx}" cy="${cy}" r="${radius}"></circle>${glyph}</g>`,
-});
-
-/** Small vector glyphs for the face buttons — geometric shapes, not a
- * manufacturer's typeface or logo. */
-const GLYPH_TRIANGLE = (cx: number, cy: number): string =>
-  `<path class="controller-diagram__glyph" d="M ${cx} ${cy - 7} L ${cx + 6.5} ${cy + 5} L ${cx - 6.5} ${cy + 5} Z"></path>`;
-const GLYPH_CIRCLE = (cx: number, cy: number): string =>
-  `<circle class="controller-diagram__glyph" cx="${cx}" cy="${cy}" r="6.5"></circle>`;
-const GLYPH_CROSS = (cx: number, cy: number): string =>
-  `<path class="controller-diagram__glyph" d="M ${cx - 5} ${cy - 5} L ${cx + 5} ${cy + 5} M ${cx + 5} ${cy - 5} L ${cx - 5} ${cy + 5}"></path>`;
-const GLYPH_SQUARE = (cx: number, cy: number): string =>
-  `<rect class="controller-diagram__glyph" x="${cx - 5.5}" y="${cy - 5.5}" width="11" height="11"></rect>`;
-
-const shapes: readonly Shape[] = [
-  // Triggers — curved bars above the shoulder line.
-  RECT('L2', 'L2', 138, 4, 104, 20, 10),
-  RECT('R2', 'R2', 238, 4, 104, 20, 10),
-  // Bumpers
-  RECT('L1', 'L1', 143, 28, 92, 22, 9),
-  RECT('R1', 'R1', 245, 28, 92, 22, 9),
-  // Create / Options — flank the touchpad's lower edge.
-  RECT('Create', 'Create', 183, 136, 30, 14, 7),
-  RECT('Options', 'Options', 267, 136, 30, 14, 7),
-  // D-pad (four arms of a cross), upper-left cluster
-  RECT('DPadUp', 'D-pad up', 147, 187, 16, 20, 3),
-  RECT('DPadDown', 'D-pad down', 147, 227, 16, 20, 3),
-  RECT('DPadLeft', 'D-pad left', 125, 209, 20, 16, 3),
-  RECT('DPadRight', 'D-pad right', 165, 209, 20, 16, 3),
-  // Face buttons, upper-right cluster — each a round cap with its printed
-  // glyph, matching the real controller (the shape is round; the symbol
-  // is what differs).
-  CIRCLE('Triangle', 'Triangle', 325, 187, 11, GLYPH_TRIANGLE(325, 187)),
-  CIRCLE('Circle', 'Circle', 347, 209, 11, GLYPH_CIRCLE(347, 209)),
-  CIRCLE('Cross', 'Cross', 325, 231, 11, GLYPH_CROSS(325, 231)),
-  CIRCLE('Square', 'Square', 303, 209, 11, GLYPH_SQUARE(303, 209)),
-  // Sticks (outer = axis pair, inner = L3/R3 click) — same lower row,
-  // level with each other (the PlayStation layout, unlike Xbox's diagonal
-  // offset — see module doc).
-  CIRCLE('LeftStickX', '', 175, 271, 28),
-  CIRCLE('L3', 'L3 (stick click)', 175, 271, 12),
-  CIRCLE('RightStickX', '', 305, 271, 28),
-  CIRCLE('R3', 'R3 (stick click)', 305, 271, 12),
-];
+import { ALL_CONTROLS, isAxisControl, isPressed } from '../control/controls.ts';
+import type { PhysicalControl, SemanticValues } from '../control/controls.ts';
+import { DEFAULT_DEADZONE } from '../control/mapping.ts';
+import {
+  BODY_FILL,
+  BUMPER_L1,
+  BUMPER_R1,
+  CREATE_BUTTON,
+  CREATE_ICON,
+  DPAD,
+  FACE,
+  FACE_RADIUS,
+  GRIP_LEFT,
+  GRIP_RIGHT,
+  HOME_BUTTON,
+  MUTE_BUTTON,
+  OPTIONS_BUTTON,
+  OPTIONS_ICON,
+  OUTLINE_PATHS,
+  STICK_CAP_RADIUS,
+  STICK_LEFT,
+  STICK_RIGHT,
+  STICK_TRAVEL,
+  STICK_WELL_RADIUS,
+  TOUCHPAD,
+  TRIGGER_BOTTOM,
+  TRIGGER_L2,
+  TRIGGER_R2,
+  TRIGGER_TOP,
+  VIEWBOX,
+} from './dualsense-paths.ts';
 
 /** The two stick outlines are drawn from LeftStickX/RightStickX but also
  * represent the paired Y axis — highlighting keys off both. */
@@ -103,28 +56,92 @@ const STICK_AXIS_PAIRS: Readonly<Partial<Record<PhysicalControl, PhysicalControl
   RightStickX: 'RightStickY',
 };
 
-/**
- * Original top-down silhouette: a central bridge (housing the touchpad,
- * Create/Options, and the PS/home roundel) flaring into two rounded grip
- * pods, with a concave notch between them — the proportions that read as
- * "dual-grip modern controller" without tracing any specific product.
- */
-const BODY_PATH = `M 190 54
-C 165 54 150 68 150 92
-L 150 136
-C 96 140 40 158 22 208
-C 6 254 18 302 60 324
-C 92 340 130 332 148 300
-C 158 282 160 260 158 238
-C 172 246 208 250 240 250
-C 272 250 308 246 322 238
-C 320 260 322 282 332 300
-C 350 332 388 340 420 324
-C 462 302 474 254 458 208
-C 440 158 384 140 330 136
-L 330 92
-C 330 68 315 54 290 54
-Z`;
+// --- pure geometry helpers (unit-tested) -----------------------------------
+
+/** Stick cap offset in SVG units: raw axes clamped to the unit circle, then
+ * scaled to full travel — a diagonal never overshoots a cardinal. */
+export function stickCapOffset(x: number, y: number): { readonly dx: number; readonly dy: number } {
+  const magnitude = Math.hypot(x, y);
+  const scale = magnitude > 1 ? STICK_TRAVEL / magnitude : STICK_TRAVEL;
+  return { dx: x * scale, dy: y * scale };
+}
+
+/** Analog trigger fill: a rect rising from the trigger's base, clamped. */
+export function triggerFillRect(value: number): { readonly y: number; readonly height: number } {
+  const depth = Math.min(1, Math.max(0, value));
+  const height = (TRIGGER_BOTTOM - TRIGGER_TOP) * depth;
+  return { y: TRIGGER_BOTTOM - height, height };
+}
+
+/** Whether a control reads as "in use" — the rule the live highlight uses. */
+export function isControlActive(values: SemanticValues, control: PhysicalControl): boolean {
+  if (!isAxisControl(control)) return isPressed(values[control]);
+  const pair = STICK_AXIS_PAIRS[control] ?? control;
+  return (
+    Math.abs(values[control]) > DEFAULT_DEADZONE.stick ||
+    Math.abs(values[pair]) > DEFAULT_DEADZONE.stick
+  );
+}
+
+// --- markup ----------------------------------------------------------------
+
+const labelOf = (control: PhysicalControl, label: string): string =>
+  label.length > 0 ? label : control;
+
+const control = (c: PhysicalControl, label: string, inner: string): string =>
+  `<g data-control="${c}" id="ctrl-${c}" tabindex="0" role="button" aria-label="${labelOf(c, label)}" class="controller-diagram__control"><title>${labelOf(c, label)}</title>${inner}</g>`;
+
+const cap = (d: string): string => `<path class="controller-diagram__cap" d="${d}"></path>`;
+const glyph = (d: string): string => `<path class="controller-diagram__glyph" d="${d}"></path>`;
+const filledGlyph = (d: string): string =>
+  `<path class="controller-diagram__glyph controller-diagram__glyph--filled" d="${d}"></path>`;
+
+const TRIGGER_FILL_X = { L2: 125, R2: 855 } as const;
+const TRIGGER_FILL_WIDTH = 140;
+
+const trigger = (c: 'L2' | 'R2', d: string): string =>
+  control(
+    c,
+    c,
+    `<path class="controller-diagram__cap controller-diagram__cap--trigger" d="${d}"></path><rect class="controller-diagram__fill" data-fill="${c}" clip-path="url(#ds-clip-${c})" x="${TRIGGER_FILL_X[c]}" y="${TRIGGER_BOTTOM}" width="${TRIGGER_FILL_WIDTH}" height="0"></rect>`,
+  );
+
+const face = (c: 'Triangle' | 'Circle' | 'Cross' | 'Square', key: keyof typeof FACE): string =>
+  control(
+    c,
+    c,
+    `<circle class="controller-diagram__cap" cx="${FACE[key].cx}" cy="${FACE[key].cy}" r="${FACE_RADIUS}"></circle>${glyph(FACE[key].glyph)}`,
+  );
+
+const dpad = (c: PhysicalControl, label: string, key: keyof typeof DPAD): string =>
+  control(c, label, `${cap(DPAD[key].shape)}${filledGlyph(DPAD[key].arrow)}`);
+
+type Side = 'left' | 'right';
+const STICK = { left: STICK_LEFT, right: STICK_RIGHT } as const;
+
+const stickWell = (c: 'LeftStickX' | 'RightStickX', side: Side): string =>
+  control(
+    c,
+    `${side === 'left' ? 'Left' : 'Right'} stick`,
+    `<circle class="controller-diagram__cap controller-diagram__well" cx="${STICK[side].cx}" cy="${STICK[side].cy}" r="${STICK_WELL_RADIUS}"></circle>`,
+  );
+
+// The cap lives inside the L3/R3 control and moves with the stick; its
+// inner <g> carries the transform so hover/focus styling stays on the group.
+const stickCap = (c: 'L3' | 'R3', side: Side): string =>
+  control(
+    c,
+    `${c} (stick click)`,
+    `<g data-stick="${side}"><circle class="controller-diagram__cap controller-diagram__stick" cx="${STICK[side].cx}" cy="${STICK[side].cy}" r="${STICK_CAP_RADIUS}"></circle><circle class="controller-diagram__values controller-diagram__dot" cx="${STICK[side].cx}" cy="${STICK[side].cy}" r="4"></circle></g>`,
+  );
+
+const crosshair = (side: Side): string => {
+  const { cx, cy } = STICK[side];
+  return `<path class="controller-diagram__values controller-diagram__crosshair" d="M${cx - STICK_TRAVEL},${cy} H${cx + STICK_TRAVEL} M${cx},${cy - STICK_TRAVEL} V${cy + STICK_TRAVEL}"></path>`;
+};
+
+const readout = (id: string, x: number, y: number, anchor: 'start' | 'middle' | 'end'): string =>
+  `<text class="controller-diagram__values controller-diagram__readout" data-readout="${id}" x="${x}" y="${y}" text-anchor="${anchor}"></text>`;
 
 // No role="img"/aria-label on the <svg> itself: that would flatten the
 // whole subtree into a single presentational image, hiding every
@@ -135,13 +152,119 @@ Z`;
 // not just mouse-only.
 export const CONTROLLER_DIAGRAM_SVG = `
 <div role="group" aria-label="Controller layout — activate a control to rebind it">
-<svg viewBox="0 0 480 340" class="controller-diagram__svg">
-  <path d="${BODY_PATH}" class="controller-diagram__body"></path>
-  <rect x="170" y="70" width="140" height="60" rx="12" class="controller-diagram__touchpad"></rect>
-  <circle cx="240" cy="172" r="9" class="controller-diagram__home"></circle>
-  ${shapes.map((s) => s.svg).join('\n  ')}
+<svg viewBox="0 0 ${VIEWBOX.width} ${VIEWBOX.height}" class="controller-diagram__svg">
+  <defs>
+    <clipPath id="ds-clip-L2"><path d="${TRIGGER_L2}"></path></clipPath>
+    <clipPath id="ds-clip-R2"><path d="${TRIGGER_R2}"></path></clipPath>
+  </defs>
+  <path class="controller-diagram__core" d="${BODY_FILL}"></path>
+  <path class="controller-diagram__shell" d="${GRIP_LEFT}"></path>
+  <path class="controller-diagram__shell" d="${GRIP_RIGHT}"></path>
+  <path class="controller-diagram__shell controller-diagram__touchpad" d="${TOUCHPAD}"></path>
+  ${OUTLINE_PATHS.map((d) => `<path class="controller-diagram__outline" d="${d}"></path>`).join('')}
+  <path class="controller-diagram__decor" d="${MUTE_BUTTON}"></path>
+  <circle class="controller-diagram__decor" cx="${HOME_BUTTON.cx}" cy="${HOME_BUTTON.cy}" r="${HOME_BUTTON.r}"></circle>
+  ${trigger('L2', TRIGGER_L2)}
+  ${trigger('R2', TRIGGER_R2)}
+  ${control('L1', 'L1', cap(BUMPER_L1))}
+  ${control('R1', 'R1', cap(BUMPER_R1))}
+  ${control('Create', 'Create', `${cap(CREATE_BUTTON)}${glyph(CREATE_ICON)}`)}
+  ${control('Options', 'Options', `${cap(OPTIONS_BUTTON)}${glyph(OPTIONS_ICON)}`)}
+  ${dpad('DPadUp', 'D-pad up', 'up')}
+  ${dpad('DPadDown', 'D-pad down', 'down')}
+  ${dpad('DPadLeft', 'D-pad left', 'left')}
+  ${dpad('DPadRight', 'D-pad right', 'right')}
+  ${face('Triangle', 'triangle')}
+  ${face('Circle', 'circle')}
+  ${face('Cross', 'cross')}
+  ${face('Square', 'square')}
+  ${stickWell('LeftStickX', 'left')}
+  ${stickWell('RightStickX', 'right')}
+  ${crosshair('left')}
+  ${crosshair('right')}
+  ${stickCap('L3', 'left')}
+  ${stickCap('R3', 'right')}
+  ${readout('LeftStick', STICK_LEFT.cx, 690, 'middle')}
+  ${readout('RightStick', STICK_RIGHT.cx, 690, 'middle')}
+  ${readout('L2', 120, 70, 'end')}
+  ${readout('R2', 997, 70, 'start')}
 </svg>
 </div>`;
+
+// --- live updater ------------------------------------------------------------
+
+export interface DiagramUpdater {
+  /** Render one frame of semantic input values onto the diagram. */
+  update(values: SemanticValues): void;
+  /** Toggle the crosshair / numeric-readout overlay. */
+  setShowValues(show: boolean): void;
+}
+
+const fmt = (n: number): string => (n < 0 ? '' : '+') + n.toFixed(2);
+
+function setFill(el: SVGRectElement | null, value: number): void {
+  if (el === null) return;
+  const { y, height } = triggerFillRect(value);
+  el.setAttribute('y', String(y));
+  el.setAttribute('height', String(height));
+}
+
+function setStick(el: SVGGElement | null, x: number, y: number): void {
+  if (el === null) return;
+  const { dx, dy } = stickCapOffset(x, y);
+  el.setAttribute('transform', `translate(${dx} ${dy})`);
+}
+
+function setText(el: SVGTextElement | null, text: string): void {
+  if (el !== null && el.textContent !== text) el.textContent = text;
+}
+
+/**
+ * Binds to an already-mounted CONTROLLER_DIAGRAM_SVG. Every element is looked
+ * up once here — the per-frame `update` does no DOM queries.
+ */
+export function createDiagramUpdater(root: HTMLElement): DiagramUpdater {
+  const controls = ALL_CONTROLS.flatMap((c) => {
+    const el = root.querySelector<SVGGElement>(`#ctrl-${c}`);
+    return el === null ? [] : [{ control: c, el }];
+  });
+  const fills = {
+    L2: root.querySelector<SVGRectElement>('[data-fill="L2"]'),
+    R2: root.querySelector<SVGRectElement>('[data-fill="R2"]'),
+  };
+  const sticks = {
+    left: root.querySelector<SVGGElement>('[data-stick="left"]'),
+    right: root.querySelector<SVGGElement>('[data-stick="right"]'),
+  };
+  const readouts = {
+    LeftStick: root.querySelector<SVGTextElement>('[data-readout="LeftStick"]'),
+    RightStick: root.querySelector<SVGTextElement>('[data-readout="RightStick"]'),
+    L2: root.querySelector<SVGTextElement>('[data-readout="L2"]'),
+    R2: root.querySelector<SVGTextElement>('[data-readout="R2"]'),
+  };
+  let showValues = false;
+
+  return {
+    update(values) {
+      for (const { control: c, el } of controls) {
+        el.classList.toggle('controller-diagram__active', isControlActive(values, c));
+      }
+      setFill(fills.L2, values.L2);
+      setFill(fills.R2, values.R2);
+      setStick(sticks.left, values.LeftStickX, values.LeftStickY);
+      setStick(sticks.right, values.RightStickX, values.RightStickY);
+      if (!showValues) return;
+      setText(readouts.LeftStick, `X ${fmt(values.LeftStickX)}  Y ${fmt(values.LeftStickY)}`);
+      setText(readouts.RightStick, `X ${fmt(values.RightStickX)}  Y ${fmt(values.RightStickY)}`);
+      setText(readouts.L2, values.L2.toFixed(2));
+      setText(readouts.R2, values.R2.toFixed(2));
+    },
+    setShowValues(show) {
+      showValues = show;
+      root.classList.toggle('controller-diagram--values', show);
+    },
+  };
+}
 
 export { STICK_AXIS_PAIRS };
 export const DIAGRAM_CONTROLS: readonly PhysicalControl[] = ALL_CONTROLS;
