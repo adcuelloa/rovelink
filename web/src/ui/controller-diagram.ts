@@ -2,15 +2,14 @@
  * Inline SVG DualSense diagram (Problem 9 §11) with live input rendering.
  *
  * Geometry comes from daidr/dualsense-tester (MIT) — see dualsense-paths.ts
- * for the attribution and the licence text. That source's manufacturer
- * logo is left out; a plain home roundel sits in its place.
+ * for the attribution, the licence text, and a note on the logo.
  *
  * Every *interactive* region (the physical controls this app actually
  * binds — see control/controls.ts) carries `data-control="<PhysicalControl>"`
  * and a matching `id="ctrl-<PhysicalControl>"`, so the settings view can
  * look elements up directly for live highlighting and click-to-rebind
  * without re-querying by position. The body, touchpad, mute button and home
- * roundel are decorative only — this app has no bindable "touchpad" or
+ * logo are decorative only — this app has no bindable "touchpad" or
  * "home" physical control — and carry no such attributes.
  *
  * Colour comes from CSS custom properties (`--pad-shell`, `--pad-core`,
@@ -31,7 +30,7 @@ import {
   FACE_RADIUS,
   GRIP_LEFT,
   GRIP_RIGHT,
-  HOME_BUTTON,
+  HOME_LOGO,
   MUTE_BUTTON,
   OPTIONS_BUTTON,
   OPTIONS_ICON,
@@ -93,6 +92,9 @@ const control = (c: PhysicalControl, label: string, inner: string): string =>
 
 const cap = (d: string): string => `<path class="controller-diagram__cap" d="${d}"></path>`;
 const glyph = (d: string): string => `<path class="controller-diagram__glyph" d="${d}"></path>`;
+/** A symbol printed on the shell next to its button, not on the cap. */
+const outsideGlyph = (d: string): string =>
+  `<path class="controller-diagram__glyph controller-diagram__glyph--outside" d="${d}"></path>`;
 const filledGlyph = (d: string): string =>
   `<path class="controller-diagram__glyph controller-diagram__glyph--filled" d="${d}"></path>`;
 
@@ -163,13 +165,13 @@ export const CONTROLLER_DIAGRAM_SVG = `
   <path class="controller-diagram__shell controller-diagram__touchpad" d="${TOUCHPAD}"></path>
   ${OUTLINE_PATHS.map((d) => `<path class="controller-diagram__outline" d="${d}"></path>`).join('')}
   <path class="controller-diagram__decor" d="${MUTE_BUTTON}"></path>
-  <circle class="controller-diagram__decor" cx="${HOME_BUTTON.cx}" cy="${HOME_BUTTON.cy}" r="${HOME_BUTTON.r}"></circle>
+  <path class="controller-diagram__logo" d="${HOME_LOGO}"></path>
   ${trigger('L2', TRIGGER_L2)}
   ${trigger('R2', TRIGGER_R2)}
   ${control('L1', 'L1', cap(BUMPER_L1))}
   ${control('R1', 'R1', cap(BUMPER_R1))}
-  ${control('Create', 'Create', `${cap(CREATE_BUTTON)}${glyph(CREATE_ICON)}`)}
-  ${control('Options', 'Options', `${cap(OPTIONS_BUTTON)}${glyph(OPTIONS_ICON)}`)}
+  ${control('Create', 'Create', `${cap(CREATE_BUTTON)}${outsideGlyph(CREATE_ICON)}`)}
+  ${control('Options', 'Options', `${cap(OPTIONS_BUTTON)}${outsideGlyph(OPTIONS_ICON)}`)}
   ${dpad('DPadUp', 'D-pad up', 'up')}
   ${dpad('DPadDown', 'D-pad down', 'down')}
   ${dpad('DPadLeft', 'D-pad left', 'left')}

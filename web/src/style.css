@@ -530,10 +530,13 @@ body {
   }
 
   /* Decorative-only regions — no bindable PhysicalControl exists for the
-   * touchpad, mute button or home roundel, so they never carry
+   * touchpad, mute button or home logo, so they never carry
    * `data-control` and never highlight. */
   .controller-diagram__touchpad {
     fill: color-mix(in oklab, var(--pad-shell) 92%, var(--pad-ink));
+  }
+  .controller-diagram__logo {
+    fill: color-mix(in oklab, var(--pad-core-ink) 30%, transparent);
   }
   .controller-diagram__decor {
     fill: none;
@@ -605,6 +608,20 @@ body {
   }
   .controller-diagram__control.controller-diagram__active .controller-diagram__glyph--filled {
     fill: var(--color-carbon);
+  }
+
+  /* Symbols beside (not on) their button sit on the shell, so they take
+   * the highlight colour themselves rather than contrasting with it. */
+  .controller-diagram__control.controller-diagram__active .controller-diagram__glyph--outside {
+    stroke: var(--color-sodium);
+  }
+
+  /* A moved stick tints and rings its well but never paints it solid —
+   * the cap on top must stay distinct so its position is readable. Solid
+   * orange on the cap itself means L3/R3 is clicked. */
+  .controller-diagram__control.controller-diagram__active .controller-diagram__well {
+    fill: color-mix(in oklab, var(--color-sodium) 28%, var(--pad-core));
+    stroke: var(--color-sodium);
   }
 
   /* "Show values" overlay: crosshairs, centre dots, numeric readouts. */

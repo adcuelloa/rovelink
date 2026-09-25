@@ -21,9 +21,9 @@ test('every physical control has exactly one interactive region', () => {
   }
 });
 
-test('no manufacturer logo path is embedded', () => {
-  // First coordinates of the logo path in the upstream source.
-  assert.equal(CONTROLLER_DIAGRAM_SVG.includes('M525.1,538.049'), false);
+test('the home logo is decorative, never a bindable control', () => {
+  assert.match(CONTROLLER_DIAGRAM_SVG, /<path class="controller-diagram__logo"/);
+  assert.doesNotMatch(CONTROLLER_DIAGRAM_SVG, /controller-diagram__logo[^>]*data-control/);
 });
 
 test('stick cap: centred at rest, full travel at a cardinal', () => {
